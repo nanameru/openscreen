@@ -270,6 +270,7 @@ export interface ChatRunEnv {
 	/** Reads recorded cursor telemetry for an asset. Built in `electron/ipc/
 	 *  handlers.ts`, where the path allow-list lives. */
 	cursor?: CursorTelemetryReader;
+	codex?: import("./codex-app-server-client").CodexAppServerClient;
 }
 
 // ponytail: zero-config noop for sink callbacks that the caller did not provide.
@@ -395,23 +396,48 @@ export async function runChat(
 		error: (message: string) => emit.error(message),
 	};
 
-	const { invokeOpenScreenAgent } = await import("./deep-agent/service");
-
-	const result = await invokeOpenScreenAgent({
-		document: workingDocument ?? emptyDocumentForTextOnly(projectId),
-		model: {
-			provider: config.provider,
-			model: config.model,
-			apiKey: apiKey ?? undefined,
-			baseUrl: config.baseUrl,
-			reasoningEffort: config.reasoningEffort,
-		},
-		history,
-		userMessage: message,
-		sink: agentSink,
-		editsAllowed,
-		cursor: env.cursor,
-	});
+	const result =
+		config.provider === "codex"
+			? await (async () => {
+					if (!env.codex) {
+						return {
+							text: "",
+							document: workingDocument ?? emptyDocumentForTextOnly(projectId),
+							mutated: false,
+							reason: "Codex app-server is unavailable in this runtime.",
+						};
+					}
+					const { invokeCodexOpenScreenAgent } = await import("./codex-chat-service");
+					return invokeCodexOpenScreenAgent({
+						document: workingDocument ?? emptyDocumentForTextOnly(projectId),
+						client: env.codex,
+						model: config.model,
+						reasoningEffort: config.reasoningEffort,
+						history,
+						userMessage: message,
+						sink: agentSink,
+						editsAllowed,
+						cursor: env.cursor,
+					});
+				})()
+			: await (async () => {
+					const { invokeOpenScreenAgent } = await import("./deep-agent/service");
+					return invokeOpenScreenAgent({
+						document: workingDocument ?? emptyDocumentForTextOnly(projectId),
+						model: {
+							provider: config.provider,
+							model: config.model,
+							apiKey: apiKey ?? undefined,
+							baseUrl: config.baseUrl,
+							reasoningEffort: config.reasoningEffort,
+						},
+						history,
+						userMessage: message,
+						sink: agentSink,
+						editsAllowed,
+						cursor: env.cursor,
+					});
+				})();
 
 	if (!result.text) {
 		// ponytail: surface the deep-agent's diagnostic so the user can see

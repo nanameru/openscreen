@@ -290,8 +290,18 @@ function createShimBridgeClient() {
 			providerId: def.id,
 			connected: credentialsByProvider.has(def.id),
 			authKind: def.authKind,
-			credentialKind: credentialsByProvider.has(def.id) ? "api-key" : null,
+			credentialKind: credentialsByProvider.has(def.id)
+				? def.id === "codex"
+					? "codex"
+					: "api-key"
+				: null,
 		})),
+		codex: {
+			available: true,
+			connected: credentialsByProvider.has("codex"),
+			email: credentialsByProvider.has("codex") ? "browser-preview@example.com" : null,
+			planType: credentialsByProvider.has("codex") ? "preview" : undefined,
+		},
 	});
 
 	// ponytail: chat sessions per project, persisted to localStorage so a
@@ -439,6 +449,17 @@ function createShimBridgeClient() {
 				activeConfig = config;
 				saveLlmState();
 				return Promise.resolve({ success: true });
+			},
+			llmConnectCodex: () => {
+				credentialsByProvider.set("codex", { apiKey: "browser-preview" });
+				activeConfig = {
+					provider: "codex",
+					model: "gpt-5.6-sol",
+					reasoningEffort: "medium",
+					allowAgentEdits: activeConfig?.allowAgentEdits,
+				};
+				saveLlmState();
+				return Promise.resolve({ success: true, snapshot: buildLlmSnapshot() });
 			},
 			llmSetApiKey: (providerId: string, apiKey: string) => {
 				if (apiKey.trim()) credentialsByProvider.set(providerId, { apiKey: apiKey.trim() });

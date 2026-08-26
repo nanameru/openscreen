@@ -1,0 +1,112 @@
+version: 1
+project:
+  name: "openscreen"
+  test_command: "npm run test"
+  repo: "nanameru/openscreen"
+
+source_roots:
+  - src
+  - electron
+  - tests
+
+cases:
+  - id: TC-001
+    title: "Codex app-serverへ接続してログイン状態を取得できる"
+    feature: "Codexサブスクリプション認証"
+    scenario: "ログイン済みCodexの検出"
+    status: pass
+    priority: high
+    type: integration
+    source:
+      - electron/ai-edition/codex-app-server-client.ts
+    test_file: "electron/ai-edition/codex-app-server-client.test.ts"
+    issues: [1]
+
+  - id: TC-002
+    title: "未ログイン時に公式認証URLを返し完了通知を検知できる"
+    feature: "Codexサブスクリプション認証"
+    scenario: "ChatGPTブラウザ認証"
+    status: pass
+    priority: high
+    type: integration
+    source:
+      - electron/ai-edition/codex-app-server-client.ts
+      - electron/native-bridge/services/aiEditionService.ts
+    test_file: "electron/ai-edition/codex-app-server-client.test.ts"
+    issues: [1]
+
+  - id: TC-003
+    title: "Codex dynamicToolsで既存の動画編集操作を実行できる"
+    feature: "Codex AI編集"
+    scenario: "チャットからタイムライン編集"
+    status: pass
+    priority: high
+    type: integration
+    source:
+      - electron/ai-edition/codex-chat-service.ts
+      - electron/ai-edition/agent-tools.ts
+    test_file: "electron/ai-edition/codex-chat-service.test.ts"
+    issues: [1]
+
+  - id: TC-004
+    title: "Codex未導入・認証中・接続済み・失敗状態を設定画面に表示できる"
+    feature: "Codex接続UI"
+    scenario: "プロバイダー設定の主要state"
+    status: pass
+    priority: high
+    type: unit
+    source:
+      - src/components/ai-edition/ProviderSettings.tsx
+    test_file: "src/components/ai-edition/ProviderSettings.test.tsx"
+    issues: [1]
+
+  - id: TC-005
+    title: "認証情報を直接読まず不正な認証URLを拒否する"
+    feature: "Codex認証セキュリティ"
+    scenario: "token非参照とURL scheme検証"
+    status: pass
+    priority: high
+    type: security
+    source:
+      - electron/ai-edition/codex-app-server-client.ts
+    test_file: "electron/ai-edition/codex-app-server-client.test.ts"
+    issues: [1]
+
+  - id: TC-006
+    title: "既存APIキープロバイダーの接続とチャットが回帰しない"
+    feature: "既存AIプロバイダー"
+    scenario: "provider回帰"
+    status: pass
+    priority: high
+    type: regression
+    source:
+      - electron/ai-edition/provider-registry.ts
+      - electron/native-bridge/services/aiEditionService.ts
+    test_file: "electron/ai-edition/provider-registry.test.ts"
+    issues: [1]
+
+  - id: TC-007
+    title: "macOSでCodex接続からAI編集まで操作できる"
+    feature: "Codex AI編集"
+    scenario: "実アプリ手動スモーク"
+    status: pass
+    priority: high
+    type: manual
+    source:
+      - src/components/ai-edition/ProviderSettings.tsx
+      - electron/ai-edition/codex-app-server-client.ts
+      - electron/ai-edition/codex-chat-service.ts
+    test_file: "technical-documentation/testing/manual-e2e-checklist.md"
+    issues: [1]
+
+  - id: TC-008
+    title: "プロジェクト未選択でもCodexへメッセージを送信できる"
+    feature: "Codexテキストチャット"
+    scenario: "動画プロジェクトを開く前の送受信"
+    status: pass
+    priority: high
+    type: regression
+    source:
+      - src/components/ai-edition/LeftPanel.tsx
+    test_file: "src/components/ai-edition/LeftPanel.providerRefresh.test.tsx"
+    issues: [1]

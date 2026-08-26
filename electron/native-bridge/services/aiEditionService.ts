@@ -9,6 +9,7 @@ import type {
 	AiEditionChatRewindResult,
 	AiEditionChatSession,
 	AiEditionChatSessionSummary,
+	AiEditionCodexConnectResult,
 	AiEditionDocumentResult,
 	AiEditionLlmConfig,
 	AiEditionLlmDisconnectResult,
@@ -20,6 +21,7 @@ import {
 	translateCaptionSegments,
 } from "../../ai-edition/caption-translate";
 import type { ChatEventSink } from "../../ai-edition/chat-service";
+import type { CodexAppServerClient } from "../../ai-edition/codex-app-server-client";
 import type { DocumentService } from "../../ai-edition/document-service";
 import type { LlmConfigStore, LlmCredential } from "../../ai-edition/llm-config-store";
 import {
@@ -44,6 +46,8 @@ export interface AiEditionServiceOptions {
 	 * method the renderer has to invoke first.
 	 */
 	llmConfig: () => LlmConfigStore;
+	codexClient: () => CodexAppServerClient;
+	openExternal: (url: string) => Promise<void>;
 	runChat: (
 		projectId: string,
 		sessionId: string,
@@ -166,7 +170,18 @@ export class AiEditionService {
 		const config = this.llmConfig.getConfig();
 		const credentialSummary: AiEditionLlmSnapshot["credentialSummary"] = [];
 		const connectedProviders: string[] = [];
+		const codex = await this.options.codexClient().readAccount();
 		for (const def of PROVIDER_DEFINITIONS) {
+			if (def.authKind === "codex-app-server") {
+				if (codex.connected) connectedProviders.push(def.id);
+				credentialSummary.push({
+					providerId: def.id,
+					connected: codex.connected,
+					authKind: def.authKind,
+					credentialKind: codex.connected ? "codex" : null,
+				});
+				continue;
+			}
 			const resolved = this.llmConfig.getCredential(def.id, def.envKeys);
 			const connected = Boolean(resolved);
 			if (connected) connectedProviders.push(def.id);
@@ -186,7 +201,46 @@ export class AiEditionService {
 				authKind: d.authKind,
 			})),
 			credentialSummary,
+			codex: {
+				available: codex.available,
+				connected: codex.connected,
+				email: codex.account?.email,
+				planType: codex.account?.planType,
+				error: codex.error,
+			},
 		};
+	}
+
+	async llmConnectCodex(): Promise<AiEditionCodexConnectResult> {
+		try {
+			const client = this.options.codexClient();
+			let account = await client.readAccount();
+			if (!account.connected) {
+				if (!account.available && account.error) throw new Error(account.error);
+				const login = await client.startLogin();
+				await this.options.openExternal(login.authUrl);
+				const completion = await client.waitForLogin(login.loginId);
+				if (!completion.success) {
+					throw new Error(completion.error || "Codex login was not completed.");
+				}
+				account = await client.readAccount();
+			}
+			if (!account.connected) throw new Error(account.error || "Codex is not signed in.");
+			const current = this.llmConfig.getConfig();
+			await this.llmConfig.setConfig({
+				provider: "codex",
+				model: current?.provider === "codex" && current.model ? current.model : "gpt-5.6-sol",
+				reasoningEffort: current?.provider === "codex" ? current.reasoningEffort : "medium",
+				allowAgentEdits: current?.allowAgentEdits,
+			});
+			return { success: true, snapshot: await this.llmGetSnapshot() };
+		} catch (error) {
+			return {
+				success: false,
+				error: error instanceof Error ? error.message : String(error),
+				snapshot: await this.llmGetSnapshot(),
+			};
+		}
 	}
 
 	async llmSetConfig(config: AiEditionLlmConfig): Promise<AiEditionDocumentResult> {
@@ -218,7 +272,7 @@ export class AiEditionService {
 	}
 
 	async llmDisconnect(providerId: string): Promise<AiEditionLlmDisconnectResult> {
-		await this.llmConfig.removeCredential(providerId);
+		if (providerId !== "codex") await this.llmConfig.removeCredential(providerId);
 		const active = this.llmConfig.getConfig();
 		if (active?.provider === providerId) {
 			await this.llmConfig.setConfig({
@@ -233,6 +287,11 @@ export class AiEditionService {
 		try {
 			const def = PROVIDER_DEFINITIONS.find((d) => d.id === providerId);
 			if (!def) return { models: [], error: `Unknown provider ${providerId}` };
+			if (providerId === "codex") {
+				const account = await this.options.codexClient().readAccount();
+				if (!account.connected) return { models: [], error: account.error || "Not connected" };
+				return { models: await this.options.codexClient().listModels() };
+			}
 			const cred = this.llmConfig.getCredential(providerId, def.envKeys);
 			if (!cred) return { models: [], error: "Not connected" };
 			const config = this.llmConfig.getConfig();

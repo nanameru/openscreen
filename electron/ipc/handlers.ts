@@ -49,6 +49,7 @@ import {
 	runChat,
 	selectSession,
 } from "../ai-edition/chat-service";
+import { CodexAppServerClient } from "../ai-edition/codex-app-server-client";
 import type { CursorTelemetryReader } from "../ai-edition/deep-agent/service";
 import { DocumentService } from "../ai-edition/document-service";
 import { LlmConfigStore } from "../ai-edition/llm-config-store";
@@ -4182,6 +4183,14 @@ export function registerIpcHandlers(
 		}
 		return aiEditionLlmConfigInstance;
 	};
+	let codexAppServerClientInstance: CodexAppServerClient | null = null;
+	const getCodexAppServerClient = (): CodexAppServerClient => {
+		if (!codexAppServerClientInstance) {
+			codexAppServerClientInstance = new CodexAppServerClient();
+		}
+		return codexAppServerClientInstance;
+	};
+	app.once("before-quit", () => codexAppServerClientInstance?.close());
 
 	registerNativeBridgeHandlers({
 		getPlatform: () => process.platform,
@@ -4218,9 +4227,14 @@ export function registerIpcHandlers(
 		},
 		getAiEditionDocuments: () => aiEditionDocuments,
 		getAiEditionLlmConfig,
+		getCodexAppServerClient,
+		openExternal: async (url) => {
+			await shell.openExternal(url);
+		},
 		runAiEditionChat: (projectId, sessionId, message, document, sink) =>
 			runChat(projectId, sessionId, message, getAiEditionLlmConfig(), document, sink, {
 				cursor: agentCursorTelemetryReader,
+				codex: getCodexAppServerClient(),
 			}),
 		undoAiEditionToolBatch: (_projectId, _sessionId) => ({
 			success: false,

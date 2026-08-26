@@ -10,10 +10,11 @@
 // here: refreshed once on mount, not again when the dialog opens, once more when it closes.
 
 import "@testing-library/jest-dom";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AiEditionLlmSnapshot } from "@/native/contracts";
 
-const llmGetSnapshot = vi.fn(() =>
+const llmGetSnapshot = vi.fn<() => Promise<AiEditionLlmSnapshot>>(() =>
 	Promise.resolve({
 		config: null,
 		connectedProviders: [],
@@ -21,12 +22,35 @@ const llmGetSnapshot = vi.fn(() =>
 		credentialSummary: [],
 	}),
 );
+const unattachedSession = {
+	id: "session-unattached",
+	projectId: "__openscreen_unattached_chat__",
+	title: "Conversation 1",
+	messageCount: 0,
+	createdAt: "2026-08-26T00:00:00.000Z",
+};
+const chatCreateSession = vi.fn(() => Promise.resolve(unattachedSession));
+const chatRun = vi.fn(() =>
+	Promise.resolve({
+		success: true,
+		assistantMessage: {
+			id: "assistant-1",
+			role: "assistant" as const,
+			content: "Hello from Codex",
+			createdAt: "2026-08-26T00:00:01.000Z",
+		},
+	}),
+);
 
 vi.mock("@/native/client", () => ({
 	nativeBridgeClient: {
 		aiEdition: {
 			llmGetSnapshot: () => llmGetSnapshot(),
-			chatListSessions: () => Promise.resolve([]),
+			chatListSessions: () =>
+				Promise.resolve(chatCreateSession.mock.calls.length ? [unattachedSession] : []),
+			chatCreateSession: (...args: Parameters<typeof chatCreateSession>) =>
+				chatCreateSession(...args),
+			chatRun: (...args: Parameters<typeof chatRun>) => chatRun(...args),
 			chatBudget: () => Promise.resolve(null),
 			llmListProviderModels: () => Promise.resolve({ models: [] }),
 		},
@@ -57,7 +81,15 @@ function CaptureDialogActions() {
 }
 
 beforeEach(() => {
-	llmGetSnapshot.mockClear();
+	llmGetSnapshot.mockReset();
+	llmGetSnapshot.mockResolvedValue({
+		config: null,
+		connectedProviders: [],
+		availableProviders: [],
+		credentialSummary: [],
+	});
+	chatCreateSession.mockClear();
+	chatRun.mockClear();
 	dialogActions = null;
 	// The panel subscribes to streamed chat events on mount; there is no preload in jsdom.
 	(window as unknown as { electronAPI?: unknown }).electronAPI = {
@@ -104,5 +136,34 @@ describe("ChatStripPanel, against the lifted provider dialog", () => {
 			dialogActions?.closeDialog();
 		});
 		expect(llmGetSnapshot).toHaveBeenCalledTimes(2);
+	});
+
+	it("sends a text-only Codex message before a video project is opened", async () => {
+		llmGetSnapshot.mockResolvedValue({
+			config: { provider: "codex", model: "gpt-5.6-sol" },
+			connectedProviders: ["codex"],
+			availableProviders: [],
+			credentialSummary: [],
+		});
+		render(
+			<EditorDialogsProvider>
+				<LeftPanel active="chat" />
+			</EditorDialogsProvider>,
+		);
+
+		const composer = await screen.findByPlaceholderText("chat.composerPlaceholder");
+		fireEvent.change(composer, { target: { value: "Hello" } });
+		fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
+
+		await waitFor(() => {
+			expect(chatCreateSession).toHaveBeenCalledWith("__openscreen_unattached_chat__");
+		});
+		expect(chatRun).toHaveBeenCalledWith(
+			"__openscreen_unattached_chat__",
+			"session-unattached",
+			"Hello",
+			undefined,
+		);
+		await screen.findByText("Hello from Codex");
 	});
 });

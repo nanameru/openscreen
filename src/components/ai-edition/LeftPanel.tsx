@@ -40,6 +40,7 @@ import { useChatBudget } from "./useChatBudget";
 export type LeftTab = "chat" | "media";
 
 const THUMB_PALETTE = ["thumbRed", "thumbGreen", "thumbAmber", "thumbCyan"] as const;
+const UNATTACHED_CHAT_PROJECT_ID = "__openscreen_unattached_chat__";
 
 // `h:mm:ss.t`, hours always shown — a third shape, so it formats itself rather
 // than calling into format.ts. It shares `splitRoundedTime` because the carry is
@@ -733,6 +734,7 @@ function ChatStripPanel() {
 	// see the prompt-bus effect below.
 	const tTimeline = useScopedT("timeline");
 	const projectId = useProjectStore((s) => s.projectId);
+	const chatProjectId = projectId ?? UNATTACHED_CHAT_PROJECT_ID;
 	const [messages, setMessages] = useState<ChatDisplayMessage[]>([]);
 	const [input, setInput] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -838,24 +840,18 @@ function ChatStripPanel() {
 	}, []);
 
 	useEffect(() => {
-		if (!projectId) {
-			setSessions([]);
-			setActiveSessionId(null);
-			setMessages([]);
-			return;
-		}
-		void refreshSessions(projectId, true);
-	}, [projectId, refreshSessions]);
+		void refreshSessions(chatProjectId, true);
+	}, [chatProjectId, refreshSessions]);
 
 	useEffect(() => {
-		if (!projectId || !activeSessionId) {
+		if (!activeSessionId) {
 			setMessages([]);
 			return;
 		}
 		void (async () => {
 			try {
 				const session = await nativeBridgeClient.aiEdition.chatSelectSession(
-					projectId,
+					chatProjectId,
 					activeSessionId,
 				);
 				if (session) {
@@ -876,7 +872,7 @@ function ChatStripPanel() {
 				// ponytail: silent — shim mode
 			}
 		})();
-	}, [projectId, activeSessionId]);
+	}, [chatProjectId, activeSessionId]);
 
 	useEffect(() => {
 		scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -884,7 +880,7 @@ function ChatStripPanel() {
 
 	const send = async (overrideText?: string) => {
 		const text = (overrideText ?? input).trim();
-		if (!projectId || !text || busy) return;
+		if (!text || busy) return;
 		// ponytail: nothing to talk to. Bounce to the settings modal instead of
 		// firing a doomed request. The composer is disabled in this state too,
 		// but Auto-enhance calls send() directly and Enter can slip through.
@@ -921,7 +917,7 @@ function ChatStripPanel() {
 			// silently starts one instead of no-op'ing.
 			let sessionId = activeSessionId;
 			if (!sessionId) {
-				const created = await nativeBridgeClient.aiEdition.chatCreateSession(projectId);
+				const created = await nativeBridgeClient.aiEdition.chatCreateSession(chatProjectId);
 				sessionId = created.id;
 				setSessions((prev) => [...prev, created]);
 				setActiveSessionId(sessionId);
@@ -935,7 +931,7 @@ function ChatStripPanel() {
 			// before the turn starts, so a manual edit landing while the agent works is
 			// detectable when its answer comes back.
 			const { result, applyDocument } = await runAgentTurn((documentSnapshot) =>
-				nativeBridgeClient.aiEdition.chatRun(projectId, sessionId, text, documentSnapshot),
+				nativeBridgeClient.aiEdition.chatRun(chatProjectId, sessionId, text, documentSnapshot),
 			);
 			const assistant = result.assistantMessage;
 			if (result.success && assistant) {
@@ -991,7 +987,7 @@ function ChatStripPanel() {
 						thinking: thinkingText || undefined,
 					},
 				]);
-				void refreshSessions(projectId);
+				void refreshSessions(chatProjectId);
 			} else {
 				toast.error(result.error ?? t("chat.chatFailed"));
 			}

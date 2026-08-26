@@ -54,6 +54,8 @@ export interface NativeBridgeContext {
 	getNativeWindowHandle?: (sender: import("electron").WebContents) => Buffer | null;
 	getAiEditionDocuments: () => DocumentService;
 	getAiEditionLlmConfig: () => import("../ai-edition/llm-config-store").LlmConfigStore;
+	getCodexAppServerClient: () => import("../ai-edition/codex-app-server-client").CodexAppServerClient;
+	openExternal: (url: string) => Promise<void>;
 	runAiEditionChat: (
 		projectId: string,
 		sessionId: string,
@@ -226,6 +228,8 @@ export function registerNativeBridgeHandlers(context: NativeBridgeContext) {
 		// Passed uncalled on purpose — invoking it here would build the store (and
 		// hit the macOS Keychain) while wiring the bridge at startup.
 		llmConfig: context.getAiEditionLlmConfig,
+		codexClient: context.getCodexAppServerClient,
+		openExternal: context.openExternal,
 		runChat: context.runAiEditionChat,
 		undoLastToolBatch: context.undoAiEditionToolBatch,
 		rewindToMessage: context.rewindToMessage,
@@ -500,6 +504,8 @@ export function registerNativeBridgeHandlers(context: NativeBridgeContext) {
 								requestId,
 								await aiEditionService.llmSetConfig(request.payload.config),
 							);
+						case "llm.connectCodex":
+							return createSuccessResponse(requestId, await aiEditionService.llmConnectCodex());
 						case "llm.setApiKey":
 							return createSuccessResponse(
 								requestId,

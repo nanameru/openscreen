@@ -34,7 +34,7 @@ vi.mock("@/native/client", () => ({
 
 import { ProviderSettingsDialog } from "./ProviderSettings";
 
-const noop = () => {};
+const noop = () => undefined;
 
 /** The top bar as NewEditorShell builds it: the menu row's action is the context's opener, and
  *  nothing else in `actions` matters here. */
@@ -148,5 +148,16 @@ describe("ProviderSettings, reached from the app menu", () => {
 		fireEvent.click(row);
 
 		expect(screen.getByRole("heading", { name: /paramètres ia/i })).toBeInTheDocument();
+	});
+
+	it("offers the official Codex sign-in flow without an API-key field", () => {
+		renderEditorChrome("en");
+		openAiSettingsFromAppMenu();
+
+		fireEvent.click(screen.getByRole("button", { name: /Codex \(ChatGPT\).*Sign in/i }));
+
+		expect(screen.getByRole("button", { name: /Sign in with Codex/i })).toBeInTheDocument();
+		expect(screen.getByText(/official Codex app-server/i)).toBeInTheDocument();
+		expect(screen.queryByLabelText(/^API key$/i)).not.toBeInTheDocument();
 	});
 });

@@ -35,6 +35,9 @@ function serviceWithCountingFactory(): { service: AiEditionService; builds: () =
 			builds += 1;
 			return store;
 		},
+		codexClient: () => ({
+			readAccount: async () => ({ available: true, connected: false }),
+		}),
 	} as unknown as AiEditionServiceOptions;
 	return { service: new AiEditionService(options), builds: () => builds };
 }
