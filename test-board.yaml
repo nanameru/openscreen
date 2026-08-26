@@ -98,3 +98,15 @@ cases:
       - electron/ai-edition/codex-chat-service.ts
     test_file: "technical-documentation/testing/manual-e2e-checklist.md"
     issues: [1]
+
+  - id: TC-008
+    title: "プロジェクト未選択でもCodexへメッセージを送信できる"
+    feature: "Codexテキストチャット"
+    scenario: "動画プロジェクトを開く前の送受信"
+    status: pass
+    priority: high
+    type: regression
+    source:
+      - src/components/ai-edition/LeftPanel.tsx
+    test_file: "src/components/ai-edition/LeftPanel.providerRefresh.test.tsx"
+    issues: [1]
