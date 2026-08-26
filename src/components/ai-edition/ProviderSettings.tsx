@@ -3,15 +3,14 @@
 // UI: 3 screens stacked in the modal, navigated by URL-less state
 // (mirroring axcut apps/web/src/App.tsx _p modal):
 //  1. **list**         — grid of provider cards, each showing label, default
-//                       model, and a CONNECTED / API KEY pill.
+//                       model, and a CONNECTED / API KEY / SIGN IN pill.
 //  2. **connect-form** — single form per provider: model + optional baseUrl +
 //                       optional reasoning effort + api-key field +
 //                       Save/Disconnect buttons.
 //
-// Every provider is API-key based since 1.8.0 dropped the ChatGPT and Copilot
-// OAuth providers (see provider-registry.ts); the device-challenge screen went
-// with them. Credentials live in the safeStorage blob (LlmConfigStore) — the
-// renderer never sees raw keys, only `kind`.
+// API credentials live in safeStorage. Codex is different: the official
+// app-server owns ChatGPT authentication, while the renderer sees only account
+// status and never receives a token.
 //
 // `ProviderSettingsDialog` at the bottom is the only mount, and the only caller of the
 // `open` / `onClose` component above it. Internal state is local-only.
@@ -148,6 +147,22 @@ function ProviderSettings({ open, onClose }: ProviderSettingsProps) {
 		}
 	};
 
+	const connectCodex = async () => {
+		setBusy(true);
+		setError(null);
+		try {
+			const result = await nativeBridgeClient.aiEdition.llmConnectCodex();
+			setSnapshot(result.snapshot);
+			if (!result.success) throw new Error(result.error || te("providerSettings.codexLoginFailed"));
+			setConfig(result.snapshot.config);
+			toast.success(te("providerSettings.saved", { provider: active?.label ?? "Codex" }));
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setBusy(false);
+		}
+	};
+
 	const disconnect = async () => {
 		if (!active) return;
 		setBusy(true);
@@ -198,6 +213,7 @@ function ProviderSettings({ open, onClose }: ProviderSettingsProps) {
 					error={error}
 					onBack={goBackToList}
 					onSave={saveApiKey}
+					onConnectCodex={connectCodex}
 					onDisconnect={disconnect}
 					listProviderModels={nativeBridgeClient.aiEdition.llmListProviderModels}
 				/>
@@ -252,8 +268,10 @@ function ProviderList({
 								</span>
 							) : (
 								<span className={`${styles.statusPill} ${styles.idle}`}>
-									<KeyIcon />
-									{te("providerSettings.pillApiKey")}
+									{def.authKind === "codex-app-server" ? null : <KeyIcon />}
+									{def.authKind === "codex-app-server"
+										? te("providerSettings.pillSignIn")
+										: te("providerSettings.pillApiKey")}
 								</span>
 							)}
 						</div>
@@ -294,6 +312,7 @@ function ProviderForm({
 	error,
 	onBack,
 	onSave,
+	onConnectCodex,
 	onDisconnect,
 	listProviderModels,
 }: {
@@ -308,6 +327,7 @@ function ProviderForm({
 	error: string | null;
 	onBack: () => void;
 	onSave: () => void;
+	onConnectCodex: () => void;
 	onDisconnect: () => void;
 	listProviderModels: (providerId: string) => Promise<{ models: string[]; error?: string }>;
 }) {
@@ -487,18 +507,24 @@ function ProviderForm({
 				</Field>
 			) : null}
 
-			<Field
-				label={te("providerSettings.apiKeyLabel")}
-				hint={isConnected ? te("providerSettings.apiKeyHintStored") : undefined}
-			>
-				<input
-					type="password"
-					value={apiKey}
-					placeholder={isConnected ? "••••••" : "sk-…"}
-					onChange={(e) => setApiKey(e.target.value)}
-					disabled={busy}
-				/>
-			</Field>
+			{def.authKind === "api-key" ? (
+				<Field
+					label={te("providerSettings.apiKeyLabel")}
+					hint={isConnected ? te("providerSettings.apiKeyHintStored") : undefined}
+				>
+					<input
+						type="password"
+						value={apiKey}
+						placeholder={isConnected ? "••••••" : "sk-…"}
+						onChange={(e) => setApiKey(e.target.value)}
+						disabled={busy}
+					/>
+				</Field>
+			) : (
+				<p style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.5 }}>
+					{te("providerSettings.codexSignInHint")}
+				</p>
+			)}
 
 			<Field
 				label={te("providerSettings.projectEditsLabel")}
@@ -567,6 +593,16 @@ function ProviderForm({
 					>
 						{busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
 						{te("providerSettings.save")}
+					</button>
+				) : def.authKind === "codex-app-server" ? (
+					<button
+						type="button"
+						className={`${styles.btn} ${styles.btnPrimary}`}
+						onClick={onConnectCodex}
+						disabled={busy}
+					>
+						{busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+						{te("providerSettings.signInWithCodex")}
 					</button>
 				) : (
 					<button

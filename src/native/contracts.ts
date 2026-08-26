@@ -251,6 +251,19 @@ export interface AiEditionLlmSnapshot {
 		authKind: string;
 		credentialKind: AiEditionLlmCredentialKind | null;
 	}>;
+	codex?: {
+		available: boolean;
+		connected: boolean;
+		email?: string | null;
+		planType?: string;
+		error?: string;
+	};
+}
+
+export interface AiEditionCodexConnectResult {
+	success: boolean;
+	snapshot: AiEditionLlmSnapshot;
+	error?: string;
 }
 
 export interface AiEditionLlmDisconnectResult {
@@ -535,6 +548,12 @@ export type NativeBridgeRequest =
 			domain: "aiEdition";
 			action: "llm.setConfig";
 			payload: { config: AiEditionLlmConfig };
+			requestId?: string;
+	  }
+	| {
+			domain: "aiEdition";
+			action: "llm.connectCodex";
+			payload?: EmptyPayload;
 			requestId?: string;
 	  }
 	| {

@@ -205,7 +205,7 @@ export interface CursorTelemetryReader {
 	probe?(input: { assetId: string; originalPath: string | null }): Promise<boolean>;
 }
 
-interface ToolRuntime {
+export interface ToolRuntime {
 	cursor?: CursorTelemetryReader;
 	availableByAssetId?: Record<string, boolean>;
 }
@@ -384,7 +384,7 @@ export interface InvokeArgs {
 
 /** One cheap probe per asset, run before the tools are built so the very first
  *  `getCurrentDocument` can already say whether telemetry exists. */
-async function probeCursorTelemetry(
+export async function probeCursorTelemetry(
 	document: AxcutDocument,
 	cursor: CursorTelemetryReader | undefined,
 ): Promise<Record<string, boolean> | undefined> {

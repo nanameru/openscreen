@@ -7,6 +7,7 @@ import {
 	type AiEditionChatRewindResult,
 	type AiEditionChatSession,
 	type AiEditionChatSessionSummary,
+	type AiEditionCodexConnectResult,
 	type AiEditionDocumentResult,
 	type AiEditionLlmConfig,
 	type AiEditionLlmDisconnectResult,
@@ -203,6 +204,11 @@ export const nativeBridgeClient = {
 				domain: "aiEdition",
 				action: "llm.setConfig",
 				payload: { config },
+			}),
+		llmConnectCodex: () =>
+			requireNativeBridgeData<AiEditionCodexConnectResult>({
+				domain: "aiEdition",
+				action: "llm.connectCodex",
 			}),
 		llmSetApiKey: (providerId: string, apiKey: string) =>
 			requireNativeBridgeData<AiEditionDocumentResult>({

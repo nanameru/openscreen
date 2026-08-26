@@ -17,9 +17,9 @@ const FIRST_PARTY_ONLY_HOSTS = [
 ];
 
 describe("PROVIDER_DEFINITIONS", () => {
-	it("ships only API-key providers", () => {
+	it("ships only API-key providers plus the sanctioned Codex app-server", () => {
 		const others = PROVIDER_DEFINITIONS.filter((def) => def.authKind !== "api-key");
-		expect(others.map((d) => d.id)).toEqual([]);
+		expect(others.map((d) => [d.id, d.authKind])).toEqual([["codex", "codex-app-server"]]);
 	});
 
 	it("points at no endpoint reserved for a vendor's own clients", () => {

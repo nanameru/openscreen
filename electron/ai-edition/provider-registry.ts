@@ -10,10 +10,7 @@ export interface ProviderDefinition {
 	id: string;
 	label: string;
 	defaultModel: string;
-	/** Only API-key providers ship today — see the removal note in
-	 * PROVIDER_DEFINITIONS. Widen this again when the Copilot SDK / Codex
-	 * app-server providers land. */
-	authKind: "api-key";
+	authKind: "api-key" | "codex-app-server";
 	supportsReasoningEffort: boolean;
 	/** True when this provider always requires the user to enter a base URL
 	 * (e.g. openai-compatible). False when the default is implicit. */
@@ -30,6 +27,16 @@ export interface ProviderDefinition {
 }
 
 export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
+	{
+		id: "codex",
+		label: "Codex (ChatGPT)",
+		defaultModel: "gpt-5.6-sol",
+		authKind: "codex-app-server",
+		supportsReasoningEffort: true,
+		envKeys: [],
+		setupHint:
+			"Sign in with your ChatGPT account through the official Codex app-server. OpenScreen never receives your Codex token.",
+	},
 	{
 		id: "anthropic",
 		label: "Claude API",
@@ -96,7 +103,8 @@ export const PROVIDER_DEFINITIONS: ProviderDefinition[] = [
 	// backend-api). Both vendors now offer a sanctioned surface — GitHub's
 	// Copilot SDK (register our own OAuth App) and `codex app-server` (drives
 	// the user's own `codex login`, no client ID shipped at all) — so these come
-	// back on those, not on borrowed credentials. Tracked in the follow-up PR.
+	// back on those, not on borrowed credentials. Codex now uses the sanctioned
+	// app-server integration above; GitHub Copilot remains out of scope.
 	{
 		id: "minimax",
 		label: "MiniMax API",
