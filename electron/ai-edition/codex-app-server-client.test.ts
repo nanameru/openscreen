@@ -1,7 +1,11 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { CodexAppServerClient, type CodexAppServerProcess } from "./codex-app-server-client";
+import {
+	CodexAppServerClient,
+	type CodexAppServerProcess,
+	resolveCodexExecutable,
+} from "./codex-app-server-client";
 
 class FakeCodexProcess extends EventEmitter implements CodexAppServerProcess {
 	readonly stdin = new PassThrough();
@@ -47,6 +51,17 @@ function resultFor(
 }
 
 describe("CodexAppServerClient", () => {
+	it("honors an explicit Codex executable path for packaged app environments", () => {
+		const previous = process.env.OPENSCREEN_CODEX_PATH;
+		process.env.OPENSCREEN_CODEX_PATH = "/Applications/Codex/bin/codex";
+		try {
+			expect(resolveCodexExecutable()).toBe("/Applications/Codex/bin/codex");
+		} finally {
+			if (previous === undefined) delete process.env.OPENSCREEN_CODEX_PATH;
+			else process.env.OPENSCREEN_CODEX_PATH = previous;
+		}
+	});
+
 	it("initializes honestly as openscreen and reads a ChatGPT account", async () => {
 		const process = new FakeCodexProcess((request) => {
 			if (request.method === "initialize") {

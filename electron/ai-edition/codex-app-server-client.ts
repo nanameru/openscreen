@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 
@@ -104,9 +107,30 @@ interface ActiveTurn {
 	timer: ReturnType<typeof setTimeout>;
 }
 
+export function resolveCodexExecutable(): string {
+	const override = process.env.OPENSCREEN_CODEX_PATH?.trim();
+	if (override) return override;
+	const executable = process.platform === "win32" ? "codex.exe" : "codex";
+	const pathCandidates = (process.env.PATH ?? "")
+		.split(path.delimiter)
+		.filter(Boolean)
+		.map((directory) => path.join(directory, executable));
+	const home = os.homedir();
+	const candidates = [
+		...pathCandidates,
+		path.join(home, ".local", "bin", executable),
+		path.join(home, ".codex", "bin", executable),
+		...(process.platform === "darwin" ? ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"] : []),
+		...(process.platform === "win32" && process.env.APPDATA
+			? [path.join(process.env.APPDATA, "npm", "codex.cmd")]
+			: []),
+	];
+	return candidates.find((candidate) => existsSync(candidate)) ?? "codex";
+}
+
 function spawnDefaultCodexProcess(): Promise<CodexAppServerProcess> {
 	return new Promise((resolve, reject) => {
-		const command = process.env.OPENSCREEN_CODEX_PATH?.trim() || "codex";
+		const command = resolveCodexExecutable();
 		const child = spawn(command, ["app-server", "--stdio"], {
 			stdio: ["pipe", "pipe", "pipe"],
 			windowsHide: true,
