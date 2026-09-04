@@ -20,3 +20,14 @@ cases:
     source: [electron/recording/nativeMacCaptureStop.ts]
     test_file: "electron/recording/nativeMacCaptureStop.test.ts"
     issues: [4]
+  - id: TC-002
+    title: "macOS録画の異常停止処理: ScreenCaptureKitが映像ストリームを停止したら録画を一度だけ自動終了し部分動画を保存する"
+    feature: "macOS録画の異常停止処理"
+    scenario: "ScreenCaptureKitが映像ストリームを停止したら録画を一度だけ自動終了し部分動画を保存する"
+    status: done
+    priority: medium
+    type: regression
+    source: [electron/ipc/handlers.ts, electron/recording/nativeMacUnexpectedStop.ts, src/hooks/useScreenRecorder.ts]
+    test_file: "src/hooks/useScreenRecorder.nativeMacUnexpectedStop.test.tsx"
+    issues: [7]
+    notes: "helper異常停止後のwriter完了通知と、renderer側の一度だけの自動終了・部分動画保存を検証。補助テスト: electron/recording/nativeMacUnexpectedStop.test.ts"

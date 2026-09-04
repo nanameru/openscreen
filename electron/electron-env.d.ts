@@ -182,6 +182,9 @@ interface Window {
 			recovered?: boolean;
 			error?: string;
 		}>;
+		onNativeMacCaptureStoppedUnexpectedly: (
+			callback: (event: import("../src/lib/nativeMacRecording").NativeMacHelperErrorEvent) => void,
+		) => () => void;
 		attachNativeMacWebcamRecording: (payload: {
 			screenVideoPath: string;
 			recordingId: number;
