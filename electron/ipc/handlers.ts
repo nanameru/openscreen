@@ -79,6 +79,11 @@ import { toHelperRect } from "../native-bridge/helperCoordinates";
 import { scoreDeviceNameMatch } from "../recording/deviceNameMatching";
 import { resolveNativeMacCaptureStop } from "../recording/nativeMacCaptureStop";
 import {
+	advanceNativeMacUnexpectedStop,
+	isNativeMacUnexpectedStopError,
+	type NativeMacUnexpectedStopState,
+} from "../recording/nativeMacUnexpectedStop";
+import {
 	isSalvageableFragmentedCapture,
 	NATIVE_WINDOWS_SALVAGEABLE_OUTPUT_BYTES,
 	readMicrophoneDefaulted,
@@ -109,6 +114,7 @@ const ALLOWED_IMPORT_VIDEO_EXTENSIONS = new Set([
 ]);
 const PREVIEW_AUDIO_DIR = path.join(app.getPath("userData"), "preview-audio");
 const nativeMacCaptureEvents = new EventEmitter();
+let nativeMacUnexpectedStop: NativeMacUnexpectedStopState = null;
 
 // Enumeration walks every display and window and grabs a thumbnail of each, so it
 // is allowed to be slow on a loaded machine. It is not allowed to be unbounded.
@@ -1384,6 +1390,15 @@ function dispatchNativeMacHelperEvent(event: Record<string, unknown>) {
 		activeMacCaptureBounds = bounds;
 	}
 	nativeMacCaptureEvents.emit("helper-event", event);
+	const transition = advanceNativeMacUnexpectedStop(nativeMacUnexpectedStop, event);
+	nativeMacUnexpectedStop = transition.pending;
+	if (transition.notification) {
+		for (const window of BrowserWindow.getAllWindows()) {
+			if (!window.isDestroyed()) {
+				window.webContents.send("native-mac-capture-stopped-unexpectedly", transition.notification);
+			}
+		}
+	}
 }
 
 function inspectNativeMacCaptureOutput() {
@@ -1489,7 +1504,7 @@ function waitForNativeMacCaptureStop(proc: ChildProcessWithoutNullStreams) {
 				resolve(String(event.screenPath ?? nativeMacCaptureTargetPath ?? ""));
 				return;
 			}
-			if (event.event === "error") {
+			if (event.event === "error" && !isNativeMacUnexpectedStopError(event)) {
 				cleanup();
 				reject(new Error(String(event.message ?? event.code ?? "Native macOS capture failed")));
 			}

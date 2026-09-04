@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { NativeLinuxRecordingRequest } from "../src/lib/nativeLinuxRecording";
-import type { NativeMacRecordingRequest } from "../src/lib/nativeMacRecording";
+import type {
+	NativeMacHelperErrorEvent,
+	NativeMacRecordingRequest,
+} from "../src/lib/nativeMacRecording";
 import type { NativeWindowsRecordingRequest } from "../src/lib/nativeWindowsRecording";
 import type { RecordingSession, StoreRecordedSessionInput } from "../src/lib/recordingSession";
 import type { ShortcutBinding } from "../src/lib/shortcuts";
@@ -242,6 +245,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	},
 	stopNativeMacRecording: (discard?: boolean) => {
 		return ipcRenderer.invoke("stop-native-mac-recording", discard);
+	},
+	onNativeMacCaptureStoppedUnexpectedly: (callback: (event: NativeMacHelperErrorEvent) => void) => {
+		const listener = (_event: unknown, captureEvent: NativeMacHelperErrorEvent) =>
+			callback(captureEvent);
+		ipcRenderer.on("native-mac-capture-stopped-unexpectedly", listener);
+		return () => ipcRenderer.removeListener("native-mac-capture-stopped-unexpectedly", listener);
 	},
 	attachNativeMacWebcamRecording: (payload: {
 		screenVideoPath: string;
