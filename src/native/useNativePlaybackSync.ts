@@ -10,12 +10,11 @@
  *  - `currentTimeSec` ticks every rAF frame during playback. Pushing
  *    `setNativeTime` per tick would force an O(n) rewind+decode seek each frame
  *    AND fight the free-run (the render thread prioritises app-requested frames
- *    over free-run). So discrete seeks are only sent while *paused* — i.e. real
- *    scrub/step interactions. Pausing also re-snaps native to the app playhead.
+ *    over free-run). Discrete seeks are sent while paused or when the user
+ *    explicitly seeks during playback. Pausing re-snaps to the app playhead.
  *
- * Known POC limitation: during free-run the native clock and the app clock can
- * drift (independent tickers); acceptable for the fixture (~6 s loop). A pause
- * re-aligns them.
+ * The clocks can drift during free-run. Correcting that requires native clock
+ * telemetry: an assumed 1x wall clock cannot measure drift at other speeds.
  */
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import type { AxcutClip } from "@/lib/ai-edition/schema";
@@ -34,6 +33,8 @@ export function useNativePlaybackSync(
 	visibleSegments: readonly AxcutClip[],
 	/** RAW clip layout (`document.timeline.clips`) `currentTimeSec` is expressed against. */
 	rawClips: readonly AxcutClip[],
+	/** Changes only for a user seek, never for a playback-clock tick. */
+	seekRequestId?: number,
 ): void {
 	const activePosition = useMemo(
 		() => resolveNativePosition(currentTimeSec, [...visibleSegments], [...rawClips]),
@@ -57,43 +58,27 @@ export function useNativePlaybackSync(
 		setNativePlaying(playing);
 	}, [active, playing]);
 
-	// Scrub/step while paused OR periodic resync during playback when drift > 100ms
-	const lastSyncedSourceTimeRef = useRef<number | null>(null);
-	const lastSyncedWallTimeRef = useRef<number>(0);
+	// A wall-clock estimate is not native decoder telemetry. At 1.5x it
+	// falsely reports 100ms of drift every 200ms and repeatedly rewinds the
+	// decoder. During playback, seek only in response to explicit user input.
+	const lastSeekRequestIdRef = useRef(seekRequestId);
 	const lastActiveClipIdRef = useRef<string | null>(null);
 
 	useEffect(() => {
 		if (!active || sourceTimeSec === null || !activeClipId) {
 			return;
 		}
-		const now = performance.now();
+		const explicitlySeeking = seekRequestId !== lastSeekRequestIdRef.current;
+		lastSeekRequestIdRef.current = seekRequestId;
 
 		// When clip changes, let setActiveClip handle the atomic clip-switch-and-seek.
 		if (lastActiveClipIdRef.current !== activeClipId) {
 			lastActiveClipIdRef.current = activeClipId;
-			lastSyncedSourceTimeRef.current = sourceTimeSec;
-			lastSyncedWallTimeRef.current = now;
 			return;
 		}
 
-		if (!playing) {
+		if (!playing || explicitlySeeking) {
 			setNativeTime(sourceTimeSec);
-			lastSyncedSourceTimeRef.current = sourceTimeSec;
-			lastSyncedWallTimeRef.current = now;
-			return;
 		}
-		// While playing: periodically verify master clock alignment to prevent drift
-		if (lastSyncedSourceTimeRef.current === null || lastSyncedWallTimeRef.current === 0) {
-			lastSyncedSourceTimeRef.current = sourceTimeSec;
-			lastSyncedWallTimeRef.current = now;
-			return;
-		}
-		const wallElapsedSec = (now - lastSyncedWallTimeRef.current) / 1000;
-		const expectedSourceTimeSec = lastSyncedSourceTimeRef.current + wallElapsedSec;
-		if (Math.abs(sourceTimeSec - expectedSourceTimeSec) > 0.1) {
-			setNativeTime(sourceTimeSec);
-			lastSyncedSourceTimeRef.current = sourceTimeSec;
-			lastSyncedWallTimeRef.current = now;
-		}
-	}, [active, playing, activeClipId, sourceTimeSec]);
+	}, [active, playing, activeClipId, sourceTimeSec, seekRequestId]);
 }

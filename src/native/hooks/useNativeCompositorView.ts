@@ -5,7 +5,7 @@
  *      rect (measured via ResizeObserver + window resize/scroll, rAF-coalesced
  *      — the exact same sync machinery as before, repurposed: it now drives
  *      the offscreen render-target resolution instead of a window position).
- *   2. Polls `readCompositorFrame` on every other rAF tick (~30fps), passing the
+ *   2. Polls `readCompositorFrame` at up to 60fps, passing the
  *      generation it last painted. Native returns a self-describing packet
  *      (`{ gen, width, height, data }`) ONLY when a newer frame exists — otherwise
  *      `null`, and the canvas is left untouched. So while the preview sits still
@@ -77,10 +77,9 @@ function safelyCall(label: string, call: () => Promise<unknown>) {
 	}
 }
 
-/** Throttle the rAF pull loop to roughly 30fps: process every other animation
- *  frame. Keeps IPC + GPU readback + putImageData cheap on high-refresh
- *  displays (120/144 Hz) without changing perceived preview smoothness. */
-const PULL_LOOP_TICK_DIVISOR = 2;
+/** Bound IPC on high-refresh displays without adding a skipped tick after a
+ * slow frame. Elapsed time includes time spent waiting for IPC and painting. */
+const PULL_INTERVAL_MS = 1000 / 60;
 
 export function useNativeCompositorView(
 	canvasRef: RefObject<HTMLCanvasElement>,
@@ -108,7 +107,7 @@ export function useNativeCompositorView(
 
 		let rectRafHandle = 0;
 		let pullRafHandle = 0;
-		let pullTick = 0;
+		let lastPullTime = Number.NEGATIVE_INFINITY;
 		let lastRect: CompositorViewRect | null = null;
 		let disposed = false;
 		// Fresh view (source or enablement changed) → the previous view's fatal error
@@ -171,17 +170,16 @@ export function useNativeCompositorView(
 		// and rewinding `lastGen` (which would re-deliver an already-painted frame).
 		let inFlight = false;
 
-		/** rAF pull loop: throttle to ~30fps and repaint ONLY when native reports a
+		/** rAF pull loop: throttle to at most 60fps and repaint ONLY when native reports a
 		 *  newer generation. The returned packet is self-describing (`gen` + dims +
 		 *  pixels), so the canvas is sized from the packet — pixels and canvas can
 		 *  never drift out of sync. Runs off the main thread so UI stays at 60/120fps. */
-		const pullLoop = () => {
+		const pullLoop = (timestamp: number) => {
 			pullRafHandle = requestAnimationFrame(pullLoop);
 			if (disposed || inFlight) {
 				return;
 			}
-			pullTick = (pullTick + 1) % PULL_LOOP_TICK_DIVISOR;
-			if (pullTick !== 0) {
+			if (timestamp - lastPullTime < PULL_INTERVAL_MS - 0.5) {
 				return;
 			}
 			const id = viewIdRef.current;
@@ -192,10 +190,10 @@ export function useNativeCompositorView(
 			if (!ctx) {
 				return;
 			}
+			lastPullTime = timestamp;
 			inFlight = true;
 			readCompositorFrame(id, lastGen)
-				.then((frame) => {
-					inFlight = false;
+				.then(async (frame) => {
 					// `null` = nothing newer than `lastGen` (idle path — no pixels
 					// crossed IPC) OR no frame yet. Either way, leave the canvas as-is.
 					if (disposed || !frame) {
@@ -229,18 +227,17 @@ export function useNativeCompositorView(
 					// `createImageBitmap` decodes off the main thread (keeps UI at 60/120fps)
 					// and snapshots `image`, so the view can be released after; `putImageData`
 					// is the synchronous fallback if bitmap creation is unavailable.
-					createImageBitmap(image)
-						.then((bitmap) => {
-							if (!disposed && ctx) {
-								ctx.drawImage(bitmap, 0, 0);
-							}
+					try {
+						const bitmap = await createImageBitmap(image);
+						try {
+							if (!disposed) ctx.drawImage(bitmap, 0, 0);
+						} finally {
 							bitmap.close();
-						})
-						.catch(() => {
-							if (!disposed && ctx) {
-								ctx.putImageData(image, 0, 0);
-							}
-						});
+						}
+					} catch {
+						if (!disposed) ctx.putImageData(image, 0, 0);
+					}
+					if (disposed) return;
 					// Advance only after a successful, validated frame — so a dropped/
 					// malformed packet is retried rather than silently skipped.
 					lastGen = gen;
@@ -250,7 +247,6 @@ export function useNativeCompositorView(
 					noteUiProbePreviewFrame();
 				})
 				.catch((cause: unknown) => {
-					inFlight = false;
 					console.warn("[compositor-view] readFrame failed:", cause);
 					// Native reports the render thread's fatal error here (see the addon's
 					// `read_frame`), and it is the ONLY place it can surface: `createView`
@@ -263,6 +259,11 @@ export function useNativeCompositorView(
 					cancelAnimationFrame(pullRafHandle);
 					pullRafHandle = 0;
 					setError(cause instanceof Error ? cause.message : String(cause));
+				})
+				.finally(() => {
+					// Keep both IPC and bitmap presentation serial: a late old bitmap
+					// must never overwrite a newer frame or build up a paint queue.
+					inFlight = false;
 				});
 		};
 
