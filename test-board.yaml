@@ -10,6 +10,16 @@ source_roots:
   - tests
 
 cases:
+  - id: TC-013
+    title: "プレビュー再生の描画順序と遅延後の再開"
+    feature: "プレビュー再生"
+    scenario: "60Hz描画、120Hz上限制御、遅延したbitmap描画の直列化"
+    status: done
+    priority: high
+    type: regression
+    source: [src/native/hooks/useNativeCompositorView.ts]
+    test_file: "src/native/hooks/useNativeCompositorView.test.ts"
+    issues: [9]
   - id: TC-001
     title: "macOS録画の保存救済: helper停止通知失敗時に完成済みMP4を救済する"
     feature: "macOS録画の保存救済"

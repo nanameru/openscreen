@@ -12,9 +12,9 @@
  * normal no-op, not a failure. Neither may raise the banner.
  */
 
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { RefObject } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
 	createCompositorView: vi.fn(),
@@ -115,5 +115,91 @@ describe("useNativeCompositorView", () => {
 		await new Promise((resolve) => setTimeout(resolve, 120));
 		expect(mocks.readCompositorFrame).not.toHaveBeenCalled();
 		expect(result.current.error).toBeNull();
+	});
+});
+
+describe("preview frame pacing", () => {
+	let callbacks: Map<number, FrameRequestCallback>;
+	let nextId: number;
+	beforeEach(() => {
+		vi.clearAllMocks();
+		callbacks = new Map();
+		nextId = 0;
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			callbacks.set(++nextId, callback);
+			return nextId;
+		});
+		vi.stubGlobal("cancelAnimationFrame", (id: number) => callbacks.delete(id));
+		mocks.createCompositorView.mockResolvedValue({ id: 7 });
+		mocks.readCompositorFrame.mockResolvedValue(null);
+	});
+	afterEach(() => vi.unstubAllGlobals());
+
+	async function tick(time: number) {
+		await act(async () => {
+			const pending = [...callbacks.values()];
+			callbacks.clear();
+			for (const callback of pending) callback(time);
+		});
+	}
+
+	it("polls each 60Hz frame and caps a 120Hz display", async () => {
+		const ref = stubCanvasRef();
+		const view = renderHook(() => useNativeCompositorView(ref));
+		await act(async () => {
+			/* Flush native view creation. */
+		});
+		await tick(0);
+		await tick(8.33);
+		expect(mocks.readCompositorFrame).toHaveBeenCalledTimes(1);
+		await tick(16.67);
+		await tick(33.33);
+		expect(mocks.readCompositorFrame).toHaveBeenCalledTimes(3);
+		view.unmount();
+	});
+
+	it("waits for bitmap presentation, then resumes without an extra skipped frame", async () => {
+		let finishBitmap!: (bitmap: ImageBitmap) => void;
+		const bitmapPromise = new Promise<ImageBitmap>((resolve) => {
+			finishBitmap = resolve;
+		});
+		vi.stubGlobal(
+			"ImageData",
+			class {
+				constructor(..._args: unknown[]) {
+					/* Canvas pixels are stubbed in jsdom. */
+				}
+			},
+		);
+		vi.stubGlobal(
+			"createImageBitmap",
+			vi.fn(() => bitmapPromise),
+		);
+		const drawImage = vi.fn();
+		const canvas = document.createElement("canvas");
+		canvas.getContext = vi.fn(() => ({ drawImage })) as unknown as HTMLCanvasElement["getContext"];
+		mocks.readCompositorFrame.mockResolvedValueOnce({
+			gen: 1,
+			width: 1,
+			height: 1,
+			data: new Uint8Array(4),
+		});
+		const ref = { current: canvas };
+		const view = renderHook(() => useNativeCompositorView(ref));
+		await act(async () => {
+			/* Flush native view creation. */
+		});
+		await tick(0);
+		await tick(16.67);
+		await tick(33.33);
+		expect(mocks.readCompositorFrame).toHaveBeenCalledTimes(1);
+		const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
+		await act(async () => finishBitmap(bitmap));
+		expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0);
+		expect(bitmap.close).toHaveBeenCalledOnce();
+		await tick(50);
+		expect(mocks.readCompositorFrame).toHaveBeenCalledTimes(2);
+		expect(mocks.readCompositorFrame).toHaveBeenLastCalledWith(7, 1);
+		view.unmount();
 	});
 });
