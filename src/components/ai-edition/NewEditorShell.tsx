@@ -76,15 +76,17 @@ interface SeekTarget {
 function NativePlaybackSync({
 	visibleClips,
 	clips,
+	seekRequestId,
 }: {
 	visibleClips: AxcutClip[];
 	clips: AxcutClip[];
+	seekRequestId?: number;
 }) {
 	const playing = useProjectStore((s) => s.playing);
 	const currentTimeSec = useProjectStore((s) => s.currentTimeSec);
 	// visibleClips = trim-compressed native stream; `clips` = RAW layout currentTimeSec
 	// is measured against. resolveNativePosition needs both (see timelineMap).
-	useNativePlaybackSync(playing, currentTimeSec, visibleClips, clips);
+	useNativePlaybackSync(playing, currentTimeSec, visibleClips, clips, seekRequestId);
 	return null;
 }
 
@@ -1165,7 +1167,11 @@ export function NewEditorShell() {
 			className={v4.app}
 			style={{ gridTemplateRows: `58px 1fr ${showTimeline ? timelineRow : "0px"}` }}
 		>
-			<NativePlaybackSync visibleClips={visibleClips} clips={clips} />
+			<NativePlaybackSync
+				visibleClips={visibleClips}
+				clips={clips}
+				seekRequestId={seekTarget?.requestId}
+			/>
 			<EditorTopBar
 				mode={mode}
 				onModeChange={setMode}
