@@ -1,6 +1,7 @@
 import { ArrowDown, Film, Plus, RotateCw, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { toFileUrl } from "@/components/video-editor/projectPersistence";
 import { useI18n, useScopedT } from "@/contexts/I18nContext";
 import type { AxcutAsset, TranscriptLanguageCode } from "@/lib/ai-edition/schema";
 import { useProjectStore } from "@/lib/ai-edition/store/projectStore";
@@ -8,6 +9,7 @@ import {
 	useAssetTranscriptions,
 	useTranscriptionStore,
 } from "@/lib/ai-edition/store/transcriptionStore";
+import { probeVideoDuration } from "@/lib/ai-edition/timeline/duration";
 import { formatSeconds } from "@/lib/ai-edition/timeline/format";
 import {
 	languageLabel,
@@ -53,6 +55,35 @@ function samePath(a: string, b: string): boolean {
 	return normalize(a) === normalize(b);
 }
 
+export async function cacheLibraryRecordingDuration(
+	recording: RecordingLibraryItem,
+	asset: AxcutAsset,
+	probe: (src: string) => Promise<number | null> = probeVideoDuration,
+): Promise<void> {
+	if (asset.durationSec != null) return;
+	const durationSec =
+		recording.durationMs != null
+			? recording.durationMs / 1000
+			: await probe(toFileUrl(recording.path));
+	if (durationSec == null || !Number.isFinite(durationSec) || durationSec <= 0) return;
+
+	const state = useProjectStore.getState();
+	const document = state.document;
+	if (!document) return;
+	const currentAsset = document.assets.find((candidate) => candidate.id === asset.id);
+	if (!currentAsset || currentAsset.durationSec != null) return;
+	const saved = await state.saveDocument(
+		{
+			...document,
+			assets: document.assets.map((candidate) =>
+				candidate.id === asset.id ? { ...candidate, durationSec } : candidate,
+			),
+		},
+		{ history: false },
+	);
+	if (!saved) throw new Error("The recording duration could not be saved.");
+}
+
 export async function addLibraryRecordingToTimeline(
 	recording: RecordingLibraryItem,
 	assets: AxcutAsset[],
@@ -62,6 +93,7 @@ export async function addLibraryRecordingToTimeline(
 	const existing = assets.find((asset) => samePath(asset.originalPath, recording.path));
 	const asset = existing ?? (await addAsset(recording.path, recording.name));
 	if (!asset) throw new Error("The recording could not be added to this project.");
+	await cacheLibraryRecordingDuration(recording, asset);
 	await onAddToTimeline(asset.id);
 	return asset.label || recording.name;
 }

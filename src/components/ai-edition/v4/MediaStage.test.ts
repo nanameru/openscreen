@@ -1,7 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
-import type { AxcutAsset } from "@/lib/ai-edition/schema";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { type AxcutAsset, createEmptyDocument } from "@/lib/ai-edition/schema";
+import { useProjectStore } from "@/lib/ai-edition/store/projectStore";
 import type { RecordingLibraryItem } from "@/lib/recordingLibrary";
-import { addLibraryRecordingToTimeline, addSelectedAssetToTimeline } from "./MediaStage";
+import {
+	addLibraryRecordingToTimeline,
+	addSelectedAssetToTimeline,
+	cacheLibraryRecordingDuration,
+} from "./MediaStage";
 
 describe("addSelectedAssetToTimeline", () => {
 	it("reports success only once the selected asset has been added", async () => {
@@ -63,11 +68,16 @@ describe("addSelectedAssetToTimeline", () => {
 });
 
 describe("addLibraryRecordingToTimeline", () => {
+	beforeEach(() => {
+		useProjectStore.getState().clear();
+	});
+
 	const recording: RecordingLibraryItem = {
 		path: "/recordings/part-2.mp4",
 		name: "part-2.mp4",
 		createdAt: 2,
 		sizeBytes: 42,
+		durationMs: 5_000,
 	};
 	const asset = {
 		id: "asset-2",
@@ -107,5 +117,30 @@ describe("addLibraryRecordingToTimeline", () => {
 			addLibraryRecordingToTimeline(recording, [], addAsset, addToTimeline),
 		).rejects.toThrow("could not be added");
 		expect(addToTimeline).not.toHaveBeenCalled();
+	});
+
+	it("caches the real duration before the timeline insertion", async () => {
+		const document = {
+			...createEmptyDocument({ projectId: "project-1", title: "Recording" }),
+			assets: [asset],
+		};
+		const saveDocument = vi.fn(async (next: typeof document) => {
+			useProjectStore.setState({ document: next });
+			return true;
+		});
+		useProjectStore.setState({
+			document,
+			// biome-ignore lint/suspicious/noExplicitAny: focused store action stub
+			saveDocument: saveDocument as any,
+		});
+
+		await cacheLibraryRecordingDuration(recording, asset);
+
+		expect(saveDocument).toHaveBeenCalledWith(
+			expect.objectContaining({
+				assets: [expect.objectContaining({ id: asset.id, durationSec: 5 })],
+			}),
+			{ history: false },
+		);
 	});
 });
