@@ -37,6 +37,11 @@ function stubElectronAPI(overrides: Record<string, unknown> = {}) {
 		setCurrentRecordingSession: vi.fn(async () => undefined),
 		setCurrentVideoPath: vi.fn(async () => undefined),
 		switchToEditor: vi.fn(async () => undefined),
+		getRecordingStorageStatus: vi.fn(async () => ({
+			success: true,
+			availableBytes: Number.MAX_SAFE_INTEGER,
+			totalBytes: Number.MAX_SAFE_INTEGER,
+		})),
 	};
 	window.electronAPI = { ...api, ...overrides } as unknown as ElectronAPI;
 }
@@ -80,6 +85,32 @@ afterEach(() => {
 });
 
 describe("useScreenRecorder native Windows stop failure", () => {
+	it("stops once and marks the saved session when free space becomes unsafe", async () => {
+		api.stopNativeWindowsRecording.mockResolvedValue({
+			success: true,
+			session: { screenVideoPath: "C:\\rec\\safe-part.mp4", createdAt: 7 },
+		});
+
+		const view = renderHook(() => useScreenRecorder());
+		await startNativeRecording(view);
+		api.getRecordingStorageStatus.mockResolvedValue({
+			success: true,
+			availableBytes: 512 * 1024 * 1024,
+			totalBytes: 100 * 1024 * 1024 * 1024,
+		});
+		await settle(5_000);
+
+		expect(api.stopNativeWindowsRecording).toHaveBeenCalledTimes(1);
+		expect(api.setCurrentRecordingSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				screenVideoPath: "C:\\rec\\safe-part.mp4",
+				stopReason: "low-disk",
+			}),
+		);
+		expect(toast.warning).toHaveBeenCalled();
+		expect(api.switchToEditor).toHaveBeenCalledTimes(1);
+	});
+
 	/**
 	 * Issue #252's second symptom. When the helper wedges, the main process
 	 * releases its handle in a `finally` regardless, so a renderer that kept its

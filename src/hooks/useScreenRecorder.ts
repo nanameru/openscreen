@@ -4,6 +4,10 @@ import { toast } from "sonner";
 import { useScopedT } from "@/contexts/I18nContext";
 import { MIC_GAIN_BOOST, mixAudioTracks } from "@/lib/audioMix";
 import {
+	createLowDiskRecordingGuard,
+	type RecordingStorageStatus,
+} from "@/lib/lowDiskRecordingGuard";
+import {
 	type NativeLinuxRecordingRequest,
 	portalOwnsSourceSelection,
 } from "@/lib/nativeLinuxRecording";
@@ -272,6 +276,8 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 	const discardRecordingId = useRef<number | null>(null);
 	const restarting = useRef(false);
 	const countdownRunId = useRef(0);
+	const lowDiskGuard = useRef(createLowDiskRecordingGuard());
+	const stopReason = useRef<"low-disk" | null>(null);
 	const [countdownActive, setCountdownActive] = useState(false);
 	const webcamReady = useRef(false);
 	const webcamAcquireId = useRef(0);
@@ -289,6 +295,18 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 			segmentStartedAt.current === null ? 0 : Date.now() - segmentStartedAt.current;
 		return accumulatedDurationMs.current + segmentDuration;
 	}, []);
+
+	const sessionWithStopMetadata = useCallback(
+		<T extends { durationMs?: number; stopReason?: "low-disk" }>(
+			session: T,
+			durationMs: number,
+		): T => ({
+			...session,
+			durationMs,
+			...(stopReason.current ? { stopReason: stopReason.current } : {}),
+		}),
+		[],
+	);
 
 	const selectMimeType = () => {
 		// H.264 first: hardware-accelerated, so sharp real-time output. AV1/VP9 are
@@ -552,6 +570,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 						createdAt: activeRecordingId,
 						cursorCaptureMode,
 						durationMs: duration,
+						...(stopReason.current ? { stopReason: stopReason.current } : {}),
 					});
 
 					if (!result.success) {
@@ -593,80 +612,86 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 		[cursorCaptureMode, teardownMedia],
 	);
 
-	const finalizeNativeWindowsRecording = useCallback(async (discard = false) => {
-		const activeNativeRecording = nativeWindowsRecording.current;
-		if (!activeNativeRecording || activeNativeRecording.finalizing) {
-			return false;
-		}
+	const finalizeNativeWindowsRecording = useCallback(
+		async (discard = false) => {
+			const activeNativeRecording = nativeWindowsRecording.current;
+			if (!activeNativeRecording || activeNativeRecording.finalizing) {
+				return false;
+			}
 
-		activeNativeRecording.finalizing = true;
-		if (!discard) {
-			setSaving(true);
-		}
+			activeNativeRecording.finalizing = true;
+			if (!discard) {
+				setSaving(true);
+			}
+			const duration = Math.max(0, getRecordingDurationMs());
 
-		const clearNativeRecordingState = () => {
-			nativeWindowsRecording.current = null;
-			setRecording(false);
-			setPaused(false);
-			setElapsedSeconds(0);
-			accumulatedDurationMs.current = 0;
-			segmentStartedAt.current = null;
-		};
+			const clearNativeRecordingState = () => {
+				nativeWindowsRecording.current = null;
+				setRecording(false);
+				setPaused(false);
+				setElapsedSeconds(0);
+				accumulatedDurationMs.current = 0;
+				segmentStartedAt.current = null;
+			};
 
-		try {
-			const result = await window.electronAPI.stopNativeWindowsRecording(discard);
-			if (discard || result.discarded) {
+			try {
+				const result = await window.electronAPI.stopNativeWindowsRecording(discard);
+				if (discard || result.discarded) {
+					clearNativeRecordingState();
+					return true;
+				}
+				if (!result.success) {
+					console.error("Failed to stop native Windows recording:", result.error);
+					toast.error(result.error ?? "Failed to stop native Windows recording");
+					// Clear anyway. The main process releases its helper handle
+					// unconditionally, so holding on here left the two sides
+					// disagreeing about whether anything was recording: the HUD kept
+					// showing a stop button, and pressing it sent a second stop that
+					// came back "Native Windows capture is not running." (issue #252).
+					// Reaching here now means the take really is unreadable -- a failed
+					// stop that left a playable fragmented file comes back `success`
+					// with a session and takes the editor path below, so this branch no
+					// longer decides the fate of a recoverable recording.
+					clearNativeRecordingState();
+					return true;
+				}
+
+				clearNativeRecordingState();
+				// The other way a camera goes missing, and the quieter one: the device
+				// opened, so nothing warned at start, but it never produced a frame and
+				// the file it left behind was empty. Say so before the editor opens
+				// without a camera and leaves the user to work out why. Through `tRef`
+				// because this callback has to stay referentially stable — see the ref's
+				// own comment.
+				if (result.webcamDropped) {
+					toast.error(tRef.current("recording.cameraCaptureUnavailable"));
+				}
+				if (result.session) {
+					await window.electronAPI.setCurrentRecordingSession(
+						sessionWithStopMetadata(result.session, duration),
+					);
+				} else if (result.path) {
+					await window.electronAPI.setCurrentVideoPath(result.path);
+				}
+
+				await window.electronAPI.switchToEditor();
+				return true;
+			} catch (error) {
+				console.error("Error saving native Windows recording:", error);
+				toast.error(
+					error instanceof Error ? error.message : "Failed to save native Windows recording",
+				);
 				clearNativeRecordingState();
 				return true;
+			} finally {
+				if (discardRecordingId.current === activeNativeRecording.recordingId) {
+					discardRecordingId.current = null;
+				}
+				setSaving(false);
 			}
-			if (!result.success) {
-				console.error("Failed to stop native Windows recording:", result.error);
-				toast.error(result.error ?? "Failed to stop native Windows recording");
-				// Clear anyway. The main process releases its helper handle
-				// unconditionally, so holding on here left the two sides
-				// disagreeing about whether anything was recording: the HUD kept
-				// showing a stop button, and pressing it sent a second stop that
-				// came back "Native Windows capture is not running." (issue #252).
-				// Reaching here now means the take really is unreadable -- a failed
-				// stop that left a playable fragmented file comes back `success`
-				// with a session and takes the editor path below, so this branch no
-				// longer decides the fate of a recoverable recording.
-				clearNativeRecordingState();
-				return true;
-			}
-
-			clearNativeRecordingState();
-			// The other way a camera goes missing, and the quieter one: the device
-			// opened, so nothing warned at start, but it never produced a frame and
-			// the file it left behind was empty. Say so before the editor opens
-			// without a camera and leaves the user to work out why. Through `tRef`
-			// because this callback has to stay referentially stable — see the ref's
-			// own comment.
-			if (result.webcamDropped) {
-				toast.error(tRef.current("recording.cameraCaptureUnavailable"));
-			}
-			if (result.session) {
-				await window.electronAPI.setCurrentRecordingSession(result.session);
-			} else if (result.path) {
-				await window.electronAPI.setCurrentVideoPath(result.path);
-			}
-
-			await window.electronAPI.switchToEditor();
-			return true;
-		} catch (error) {
-			console.error("Error saving native Windows recording:", error);
-			toast.error(
-				error instanceof Error ? error.message : "Failed to save native Windows recording",
-			);
-			clearNativeRecordingState();
-			return true;
-		} finally {
-			if (discardRecordingId.current === activeNativeRecording.recordingId) {
-				discardRecordingId.current = null;
-			}
-			setSaving(false);
-		}
-	}, []);
+		},
+		[getRecordingDurationMs, sessionWithStopMetadata],
+	);
 
 	const finalizeNativeMacRecording = useCallback(
 		async (discard = false) => {
@@ -756,7 +781,9 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 
 				clearNativeRecordingState();
 				if (result.session) {
-					await window.electronAPI.setCurrentRecordingSession(result.session);
+					await window.electronAPI.setCurrentRecordingSession(
+						sessionWithStopMetadata(result.session, duration),
+					);
 				} else if (result.path) {
 					await window.electronAPI.setCurrentVideoPath(result.path);
 				}
@@ -783,7 +810,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 				setSaving(false);
 			}
 		},
-		[cursorCaptureMode, getRecordingDurationMs],
+		[cursorCaptureMode, getRecordingDurationMs, sessionWithStopMetadata],
 	);
 
 	/**
@@ -874,7 +901,9 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 
 				clearNativeRecordingState();
 				if (result.session) {
-					await window.electronAPI.setCurrentRecordingSession(result.session);
+					await window.electronAPI.setCurrentRecordingSession(
+						sessionWithStopMetadata(result.session, duration),
+					);
 				} else if (result.path) {
 					await window.electronAPI.setCurrentVideoPath(result.path);
 				}
@@ -901,7 +930,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 				setSaving(false);
 			}
 		},
-		[cursorCaptureMode, getRecordingDurationMs],
+		[cursorCaptureMode, getRecordingDurationMs, sessionWithStopMetadata],
 	);
 
 	const stopRecording = useRef(() => {
@@ -957,6 +986,47 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 			}
 		}
 	});
+
+	useEffect(() => {
+		if (!recording) return;
+		lowDiskGuard.current.reset();
+		stopReason.current = null;
+	}, [recording]);
+
+	useEffect(() => {
+		if (!recording || paused) return;
+		let cancelled = false;
+		let checking = false;
+
+		const checkStorage = async () => {
+			if (checking || cancelled) return;
+			checking = true;
+			try {
+				const result = await window.electronAPI.getRecordingStorageStatus();
+				if (
+					!cancelled &&
+					result.success &&
+					typeof result.availableBytes === "number" &&
+					typeof result.totalBytes === "number" &&
+					lowDiskGuard.current.check(result as RecordingStorageStatus, result.safetyStopBytes)
+				) {
+					stopReason.current = "low-disk";
+					toast.warning("Recording stopped before storage ran out. The recorded part is safe.");
+					stopRecording.current();
+				}
+			} catch (error) {
+				console.warn("Failed to check recording storage:", error);
+			} finally {
+				checking = false;
+			}
+		};
+
+		const interval = window.setInterval(checkStorage, 5_000);
+		return () => {
+			cancelled = true;
+			window.clearInterval(interval);
+		};
+	}, [paused, recording]);
 
 	const safeHideCountdownOverlay = useCallback(async (runId: number) => {
 		try {
@@ -2224,6 +2294,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 	}, [getRecordingDurationMs, paused, recording]);
 
 	const cancelRecording = () => {
+		void window.electronAPI.setCurrentRecordingSession(null);
 		if (nativeWindowsRecording.current) {
 			const activeRecordingId = recordingId.current;
 			discardRecordingId.current = activeRecordingId;

@@ -17,6 +17,9 @@ export type CursorCaptureMode = "editable-overlay" | "system";
 
 export interface RecordingSession extends ProjectMedia {
 	createdAt: number;
+	durationMs?: number;
+	stopReason?: "low-disk";
+	returnProjectId?: string;
 }
 
 export interface RecordedVideoAssetInput {
@@ -38,6 +41,7 @@ export interface StoreRecordedSessionInput {
 	durationMs?: number;
 	/** See {@link ProjectMedia.webcamOffsetMs}. */
 	webcamOffsetMs?: number;
+	stopReason?: "low-disk";
 }
 
 export function normalizeCursorCaptureMode(value: unknown): CursorCaptureMode | undefined {
@@ -97,5 +101,12 @@ export function normalizeRecordingSession(candidate: unknown): RecordingSession 
 			typeof raw.createdAt === "number" && Number.isFinite(raw.createdAt)
 				? raw.createdAt
 				: Date.now(),
+		...(typeof raw.durationMs === "number" && Number.isFinite(raw.durationMs)
+			? { durationMs: Math.max(0, raw.durationMs) }
+			: {}),
+		...(raw.stopReason === "low-disk" ? { stopReason: raw.stopReason } : {}),
+		...(typeof raw.returnProjectId === "string" && raw.returnProjectId.trim()
+			? { returnProjectId: raw.returnProjectId.trim() }
+			: {}),
 	};
 }

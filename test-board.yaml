@@ -1,0 +1,74 @@
+version: 1
+project:
+  name: "openscreen"
+  test_command: "npm run test"
+  repo: "nanameru/openscreen"
+
+source_roots: [src, electron, tests]
+
+cases:
+  - id: TC-LOWDISK-01
+    title: "録画先ボリュームの空き容量を取得できる"
+    feature: "低容量保護"
+    scenario: "保存先の空き容量確認"
+    status: done
+    priority: high
+    type: unit
+    source: [electron/ipc/handlers.ts]
+    test_file: "electron/ipc/recordingStorage.test.ts"
+    issues: [12]
+
+  - id: TC-LOWDISK-02
+    title: "危険水準で録画停止を一度だけ要求する"
+    feature: "低容量保護"
+    scenario: "容量不足前の安全停止"
+    status: done
+    priority: high
+    type: regression
+    source: [src/lib/lowDiskRecordingGuard.ts, src/hooks/useScreenRecorder.ts]
+    test_file: "src/lib/lowDiskRecordingGuard.test.ts"
+    issues: [12]
+
+  - id: TC-LOWDISK-03
+    title: "保存済み録画を同じプロジェクト末尾へ明示的に追加する"
+    feature: "録画ライブラリ"
+    scenario: "複数セグメントを選択して同一プロジェクト化"
+    status: done
+    priority: high
+    type: integration
+    source: [src/components/ai-edition/v4/MediaStage.tsx]
+    test_file: "src/components/ai-edition/v4/MediaStage.test.ts"
+    issues: [12]
+
+  - id: TC-LOWDISK-04
+    title: "macOSで低容量停止後の録画をライブラリから再利用できる"
+    feature: "録画ライブラリ"
+    scenario: "実アプリの停止・保存・明示追加"
+    status: done
+    priority: high
+    type: manual
+    source: [src/hooks/useScreenRecorder.ts, src/components/ai-edition/NewEditorShell.tsx]
+    test_file: "technical-documentation/testing/manual-e2e-checklist.md"
+    issues: [12]
+
+  - id: TC-LOWDISK-05
+    title: "同じ録画パスを追加してもプロジェクトアセットを複製しない"
+    feature: "録画ライブラリ"
+    scenario: "同一ソースの参照再利用"
+    status: done
+    priority: high
+    type: regression
+    source: [src/components/ai-edition/v4/MediaStage.tsx]
+    test_file: "src/components/ai-edition/v4/MediaStage.test.ts"
+    issues: [12]
+
+  - id: TC-LOWDISK-06
+    title: "編集画面からの通常録画をタイムラインへ自動追加しない"
+    feature: "録画ライブラリ"
+    scenario: "意図的な新規録画の保存"
+    status: done
+    priority: high
+    type: regression
+    source: [src/components/ai-edition/recordingImport.ts]
+    test_file: "src/components/ai-edition/recordingImport.test.ts"
+    issues: [12]

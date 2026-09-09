@@ -140,6 +140,14 @@ const DECLARED: WritePath[] = [
 	w("src/components/ai-edition/NewEditorShell.tsx", "pasteRegion", "save", "gesture"),
 	// The window is closing and the user answered "save".
 	w("src/components/ai-edition/NewEditorShell.tsx", "unsubSaveBeforeClose", "save", "gesture"),
+	// Media-library metadata is cached before the user's insert so the clip starts
+	// at its real duration. The cache itself is not an edit or undo step.
+	w(
+		"src/components/ai-edition/v4/MediaStage.tsx",
+		"cacheLibraryRecordingDuration",
+		"save",
+		"automatic",
+	),
 
 	// The agent's document. The optimistic write is not the edit — the save is, and
 	// it names the pre-agent document as what Ctrl+Z returns to.

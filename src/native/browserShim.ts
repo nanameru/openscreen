@@ -114,9 +114,17 @@ function createShimElectronAPI() {
 		pickExportSavePath: () => Promise.resolve({ success: false, canceled: true }),
 		writeExportToPath: () => Promise.resolve({ success: false }),
 		getCurrentRecordingSession: () => Promise.resolve({ success: false, session: null }),
+		getRecordingStorageStatus: () =>
+			Promise.resolve({
+				success: true,
+				availableBytes: Number.MAX_SAFE_INTEGER,
+				totalBytes: Number.MAX_SAFE_INTEGER,
+				safetyStopBytes: 1_073_741_824,
+			}),
+		listRecordingLibrary: () => Promise.resolve({ success: true, recordings: [] }),
 		switchToHud: () => Promise.resolve({ success: true }),
 		switchToEditor: () => Promise.resolve({ success: true }),
-		startNewRecording: () => Promise.resolve({ success: true }),
+		startNewRecording: (_returnProjectId?: string) => Promise.resolve({ success: true }),
 		openSourceSelector: () => Promise.resolve({ success: true }),
 		setHasUnsavedChanges: () => undefined,
 		sendCloseConfirmResponse: () => undefined,

@@ -235,8 +235,31 @@ export function NewEditorShell() {
 		void (async () => {
 			if (!window.electronAPI) return;
 			try {
-				if (await importPendingRecording()) {
-					toast.success("Recording added to a new project");
+				const recordingImport = await importPendingRecording();
+				if (recordingImport.imported) {
+					if (recordingImport.savedToLibrary) {
+						toast.success(te("mediaStage.savedToLibrary"), {
+							description:
+								recordingImport.stopReason === "low-disk"
+									? te("mediaStage.lowDiskSavedToLibraryHint")
+									: te("mediaStage.savedToLibraryHint"),
+							duration: 12_000,
+						});
+						return;
+					}
+					if (recordingImport.stopReason === "low-disk") {
+						toast.warning("Recording paused before storage ran out", {
+							description:
+								"Free some space, then click Record to continue. Time while stopped is not captured.",
+							duration: 12_000,
+						});
+					} else {
+						toast.success(
+							recordingImport.continued
+								? "Recording continued in the same project"
+								: "Recording added to a new project",
+						);
+					}
 					return;
 				}
 			} catch (err) {
@@ -273,7 +296,7 @@ export function NewEditorShell() {
 				console.warn("[editor] auto-load failed", e);
 			}
 		})();
-	}, [loadProject]);
+	}, [loadProject, te]);
 
 	// Warn on close when dirty
 	useEffect(() => {
@@ -722,24 +745,24 @@ export function NewEditorShell() {
 					}
 				}
 				if (action === "record") {
-					void window.electronAPI?.startNewRecording?.().catch((err) => {
+					void window.electronAPI?.startNewRecording?.(projectId ?? undefined).catch((err) => {
 						console.warn("[editor] failed to start a new recording:", err);
 					});
 				}
 				resolve(choice);
 			})();
 		},
-		[saveDocument, unsavedPrompt],
+		[projectId, saveDocument, unsavedPrompt],
 	);
 
 	const handleNewRecording = useCallback(async () => {
 		const choice = await promptUnsaved("record");
 		if (choice !== "cancel") {
-			void window.electronAPI?.startNewRecording?.().catch((err) => {
+			void window.electronAPI?.startNewRecording?.(projectId ?? undefined).catch((err) => {
 				console.warn("[editor] failed to start a new recording:", err);
 			});
 		}
-	}, [promptUnsaved]);
+	}, [projectId, promptUnsaved]);
 
 	const handleExport = useCallback(() => {
 		if (!hasAsset) {

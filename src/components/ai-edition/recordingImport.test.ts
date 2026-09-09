@@ -19,19 +19,34 @@ vi.mock("@/native/client", () => ({ nativeBridgeClient: { aiEdition: bridge } })
 
 const createProject = vi.fn(async () => undefined);
 const addAsset = vi.fn(async () => null);
+const loadProject = vi.fn(async () => null);
 const replaceTimeline = vi.fn(async () => undefined);
+const saveDocument = vi.fn(async (_document: AxcutDocument) => true);
 
 // Read before anything stubs them: the first describe replaces these actions on the
 // live store, and `clear()` resets the DATA, not the actions.
 const realActions = {
 	createProject: useProjectStore.getState().createProject,
+	loadProject: useProjectStore.getState().loadProject,
 	addAsset: useProjectStore.getState().addAsset,
 	replaceTimeline: useProjectStore.getState().replaceTimeline,
+	saveDocument: useProjectStore.getState().saveDocument,
 };
 
 /** Stands in for the main-process recording slot: one value, set and read. */
-function stubElectronApi(screenVideoPath: string | null) {
-	let session = screenVideoPath ? { screenVideoPath, createdAt: 0 } : null;
+function stubElectronApi(
+	value:
+		| string
+		| null
+		| {
+				screenVideoPath: string;
+				createdAt: number;
+				durationMs?: number;
+				stopReason?: "low-disk";
+				returnProjectId?: string;
+		  },
+) {
+	let session = typeof value === "string" ? { screenVideoPath: value, createdAt: 0 } : value;
 	const api = {
 		getCurrentRecordingSession: vi.fn(async () =>
 			session ? { success: true, session } : { success: false },
@@ -54,21 +69,28 @@ describe("importPendingRecording", () => {
 			// biome-ignore lint/suspicious/noExplicitAny: partial action stubs, the rest of the store is untouched
 			createProject: createProject as any,
 			// biome-ignore lint/suspicious/noExplicitAny: partial action stubs, the rest of the store is untouched
+			loadProject: loadProject as any,
+			// biome-ignore lint/suspicious/noExplicitAny: partial action stubs, the rest of the store is untouched
 			addAsset: addAsset as any,
 			replaceTimeline,
+			// biome-ignore lint/suspicious/noExplicitAny: partial action stubs, the rest of the store is untouched
+			saveDocument: saveDocument as any,
 		});
 	});
 
 	it("does nothing when no recording is waiting", async () => {
 		stubElectronApi(null);
-		await expect(importPendingRecording()).resolves.toBe(false);
+		await expect(importPendingRecording()).resolves.toEqual({ imported: false, continued: false });
 		expect(createProject).not.toHaveBeenCalled();
 	});
 
 	it("imports the recording into a new project and consumes the hand-off", async () => {
 		const api = stubElectronApi("C:\\recordings\\recording-1.mp4");
 
-		await expect(importPendingRecording()).resolves.toBe(true);
+		await expect(importPendingRecording()).resolves.toMatchObject({
+			imported: true,
+			continued: false,
+		});
 
 		expect(createProject).toHaveBeenCalledTimes(1);
 		expect(addAsset).toHaveBeenCalledWith("C:\\recordings\\recording-1.mp4", "recording-1.mp4");
@@ -83,10 +105,50 @@ describe("importPendingRecording", () => {
 		stubElectronApi("C:\\recordings\\recording-1.mp4");
 
 		await importPendingRecording();
-		await expect(importPendingRecording()).resolves.toBe(false);
+		await expect(importPendingRecording()).resolves.toEqual({ imported: false, continued: false });
 
 		expect(createProject).toHaveBeenCalledTimes(1);
 		expect(addAsset).toHaveBeenCalledTimes(1);
+	});
+
+	it("returns to the existing project and leaves the recording in the library", async () => {
+		const api = stubElectronApi({
+			screenVideoPath: "/recordings/recording-2.webm",
+			createdAt: 2,
+			durationMs: 12_000,
+			stopReason: "low-disk",
+			returnProjectId: "project-1",
+		});
+		const previous = {
+			assets: [{ id: "asset-1", durationSec: 10 }],
+			timeline: {
+				clips: [
+					{
+						id: "clip-1",
+						assetId: "asset-1",
+						timelineStartSec: 0,
+						timelineEndSec: 10,
+					},
+				],
+			},
+		};
+		loadProject.mockImplementationOnce(async () => {
+			// biome-ignore lint/suspicious/noExplicitAny: focused import fixture
+			useProjectStore.setState({ document: previous as any });
+			return null;
+		});
+		await expect(importPendingRecording()).resolves.toEqual({
+			imported: true,
+			continued: false,
+			savedToLibrary: true,
+			stopReason: "low-disk",
+		});
+
+		expect(loadProject).toHaveBeenCalledWith("project-1");
+		expect(addAsset).not.toHaveBeenCalled();
+		expect(saveDocument).not.toHaveBeenCalled();
+		expect(useProjectStore.getState().document).toBe(previous);
+		expect(api.setCurrentRecordingSession).toHaveBeenCalledWith(null);
 	});
 
 	it("seeds a placeholder clip when the imported asset has none", async () => {

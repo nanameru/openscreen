@@ -1,6 +1,7 @@
 import { ArrowDown, Film, Plus, RotateCw, Search, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { toFileUrl } from "@/components/video-editor/projectPersistence";
 import { useI18n, useScopedT } from "@/contexts/I18nContext";
 import type { AxcutAsset, TranscriptLanguageCode } from "@/lib/ai-edition/schema";
 import { useProjectStore } from "@/lib/ai-edition/store/projectStore";
@@ -8,6 +9,7 @@ import {
 	useAssetTranscriptions,
 	useTranscriptionStore,
 } from "@/lib/ai-edition/store/transcriptionStore";
+import { probeVideoDuration } from "@/lib/ai-edition/timeline/duration";
 import { formatSeconds } from "@/lib/ai-edition/timeline/format";
 import {
 	languageLabel,
@@ -17,6 +19,7 @@ import type {
 	AssetTranscriptionStatus,
 	AssetTranscriptionView,
 } from "@/lib/ai-edition/transcription/status";
+import type { RecordingLibraryItem } from "@/lib/recordingLibrary";
 import { formatBytes } from "@/utils/formatBytes";
 import {
 	TranscriptionProgressBar,
@@ -47,6 +50,54 @@ export async function addSelectedAssetToTimeline(
 	onSuccess(selected.label || basename(selected.originalPath));
 }
 
+function samePath(a: string, b: string): boolean {
+	const normalize = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "");
+	return normalize(a) === normalize(b);
+}
+
+export async function cacheLibraryRecordingDuration(
+	recording: RecordingLibraryItem,
+	asset: AxcutAsset,
+	probe: (src: string) => Promise<number | null> = probeVideoDuration,
+): Promise<void> {
+	if (asset.durationSec != null) return;
+	const durationSec =
+		recording.durationMs != null
+			? recording.durationMs / 1000
+			: await probe(toFileUrl(recording.path));
+	if (durationSec == null || !Number.isFinite(durationSec) || durationSec <= 0) return;
+
+	const state = useProjectStore.getState();
+	const document = state.document;
+	if (!document) return;
+	const currentAsset = document.assets.find((candidate) => candidate.id === asset.id);
+	if (!currentAsset || currentAsset.durationSec != null) return;
+	const saved = await state.saveDocument(
+		{
+			...document,
+			assets: document.assets.map((candidate) =>
+				candidate.id === asset.id ? { ...candidate, durationSec } : candidate,
+			),
+		},
+		{ history: false },
+	);
+	if (!saved) throw new Error("The recording duration could not be saved.");
+}
+
+export async function addLibraryRecordingToTimeline(
+	recording: RecordingLibraryItem,
+	assets: AxcutAsset[],
+	addAsset: (path: string, label?: string) => Promise<AxcutAsset | null>,
+	onAddToTimeline: (assetId: string) => Promise<void>,
+): Promise<string> {
+	const existing = assets.find((asset) => samePath(asset.originalPath, recording.path));
+	const asset = existing ?? (await addAsset(recording.path, recording.name));
+	if (!asset) throw new Error("The recording could not be added to this project.");
+	await cacheLibraryRecordingDuration(recording, asset);
+	await onAddToTimeline(asset.id);
+	return asset.label || recording.name;
+}
+
 export function MediaStage({
 	onAddToTimeline,
 }: {
@@ -65,6 +116,8 @@ export function MediaStage({
 	const transcriptionLabel = useTranscriptionLabel();
 	const [query, setQuery] = useState("");
 	const [busy, setBusy] = useState(false);
+	const [libraryBusyPath, setLibraryBusyPath] = useState<string | null>(null);
+	const [recordings, setRecordings] = useState<RecordingLibraryItem[]>([]);
 	const [selectedId, setSelectedId] = useState<string | null>(null);
 	const [detailOpen, setDetailOpen] = useState(false);
 	const [lang, setLang] = useState<TranscriptLanguageCode>("auto");
@@ -82,6 +135,26 @@ export function MediaStage({
 			}),
 		[assets, query],
 	);
+	const filteredRecordings = useMemo(
+		() =>
+			recordings.filter((recording) =>
+				query ? recording.name.toLowerCase().includes(query.toLowerCase()) : true,
+			),
+		[query, recordings],
+	);
+
+	useEffect(() => {
+		let active = true;
+		void window.electronAPI
+			?.listRecordingLibrary()
+			.then((result) => {
+				if (active && result.success) setRecordings(result.recordings);
+			})
+			.catch(() => undefined);
+		return () => {
+			active = false;
+		};
+	}, []);
 	const selected = assets.find((a) => a.id === selectedId) ?? null;
 	const transcript = selected
 		? (document?.transcripts?.find((t) => t.assetId === selected.id) ?? null)
@@ -124,6 +197,22 @@ export function MediaStage({
 		}).catch(() => undefined);
 	};
 
+	const addRecording = (recording: RecordingLibraryItem) => {
+		if (!projectId) {
+			toast.error(t("mediaStage.openProjectFirst"));
+			return;
+		}
+		setLibraryBusyPath(recording.path);
+		void addLibraryRecordingToTimeline(recording, assets, addAsset, onAddToTimeline)
+			.then((label) => toast.success(t("mediaStage.addedToTimeline", { label })))
+			.catch((error) =>
+				toast.error(t("mediaStage.couldNotAddAsset"), {
+					description: error instanceof Error ? error.message : String(error),
+				}),
+			)
+			.finally(() => setLibraryBusyPath(null));
+	};
+
 	return (
 		<div className={styles.mediaStage}>
 			<div className={styles.mediaInner} style={{ maxWidth: detailOpen ? 1120 : 900 }}>
@@ -137,6 +226,60 @@ export function MediaStage({
 				</div>
 				<div className={styles.mediaCols}>
 					<div className={styles.mediaListCol}>
+						<section className={styles.recordingLibrary}>
+							<div className={styles.recordingLibraryHeader}>
+								<div>
+									<h2>{t("mediaStage.recordingLibrary")}</h2>
+									<p>{t("mediaStage.recordingLibraryHint")}</p>
+								</div>
+								<span>{filteredRecordings.length}</span>
+							</div>
+							<div className={styles.recordingLibraryList}>
+								{filteredRecordings.map((recording) => (
+									<div
+										key={recording.path}
+										className={`${styles.recordingLibraryItem}${
+											recording.stopReason === "low-disk" ? ` ${styles.lowDiskRecording}` : ""
+										}`}
+										title={recording.path}
+									>
+										<Film size={20} />
+										<div className={styles.recordingLibraryMeta}>
+											<strong>{recording.name}</strong>
+											<span>
+												{new Intl.DateTimeFormat(locale, {
+													dateStyle: "short",
+													timeStyle: "short",
+												}).format(recording.createdAt)}
+												{" · "}
+												{recording.durationMs === undefined
+													? "—"
+													: formatSeconds(recording.durationMs / 1000)}
+												{" · "}
+												{formatBytes(recording.sizeBytes)}
+											</span>
+										</div>
+										{recording.stopReason === "low-disk" ? (
+											<span className={styles.lowDiskBadge}>{t("mediaStage.lowDiskSaved")}</span>
+										) : null}
+										<button
+											type="button"
+											className={styles.libraryAddBtn}
+											disabled={!projectId || libraryBusyPath !== null}
+											onClick={() => addRecording(recording)}
+										>
+											<Plus size={14} />
+											{t("mediaStage.addToTimeline")}
+										</button>
+									</div>
+								))}
+								{filteredRecordings.length === 0 ? (
+									<div className={styles.recordingLibraryEmpty}>
+										{t("mediaStage.recordingLibraryEmpty")}
+									</div>
+								) : null}
+							</div>
+						</section>
 						<div
 							className={styles.mediaGrid}
 							style={{ gridTemplateColumns: detailOpen ? "repeat(2,1fr)" : "repeat(3,1fr)" }}
