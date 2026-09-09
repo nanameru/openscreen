@@ -2,8 +2,9 @@
 //
 // The HUD parks the recording it just finished in ONE main-process slot
 // (`set/getCurrentRecordingSession`) and opens the editor, which imports it into
-// a fresh project on mount. The slot has to be emptied once that project owns
-// the file, because opening the editor destroys and recreates its window
+// a fresh project on mount, or returns to the project that launched recording.
+// The slot has to be emptied once the editor has handled it, because opening the
+// editor destroys and recreates its window
 // (`createEditorWindowWrapper` in electron/main.ts) — so a session left in place
 // is imported AGAIN on the next open: a second project on the same recording,
 // back at the default padding / roundness / wallpaper, while everything the user
@@ -14,18 +15,19 @@
 // derived `currentVideoPath`); the only renderer that still needs the session
 // after this point is the CLI runner, which lives in its own process.
 
-import { createId } from "@/lib/ai-edition/document/ids";
 import { useProjectStore } from "@/lib/ai-edition/store/projectStore";
 
 export type RecordingImportResult = {
 	imported: boolean;
 	continued: boolean;
+	savedToLibrary?: boolean;
 	stopReason?: "low-disk";
 };
 
 /**
- * Imports the recording the HUD handed over into a new project, and consumes the
- * hand-off so it is imported exactly once.
+ * Imports a HUD recording into a new project. Recordings launched from an
+ * existing editor return to that project but stay in the recording library until
+ * the user explicitly adds them. Either path consumes the hand-off exactly once.
  *
  * Returns false when there is nothing pending — the caller then falls back to
  * reopening the most recent project. Throws if the import itself fails, leaving
@@ -40,19 +42,21 @@ export async function importPendingRecording(): Promise<RecordingImportResult> {
 	if (!screenPath) return { imported: false, continued: false };
 
 	const label = screenPath.split(/[\\/]/).pop() || "Recording";
-	const continuationProjectId = result.session?.continuationProjectId;
-	if (continuationProjectId) {
-		await useProjectStore.getState().loadProject(continuationProjectId);
+	const returnProjectId = result.session?.returnProjectId;
+	if (returnProjectId) {
+		await useProjectStore.getState().loadProject(returnProjectId);
+		await api.setCurrentRecordingSession(null);
+		return {
+			imported: true,
+			continued: false,
+			savedToLibrary: true,
+			...(result.session?.stopReason ? { stopReason: result.session.stopReason } : {}),
+		};
 	} else {
 		await useProjectStore.getState().createProject(`Recording ${new Date().toLocaleString()}`);
 	}
-	const addedAsset = await useProjectStore.getState().addAsset(screenPath, label);
-	// A new project's hand-off is consumed once the asset is persisted. A
-	// continuation stays available until its timeline append is saved so a failed
-	// project load cannot lose the user's take.
-	if (!continuationProjectId) {
-		await api.setCurrentRecordingSession(null);
-	}
+	await useProjectStore.getState().addAsset(screenPath, label);
+	await api.setCurrentRecordingSession(null);
 
 	// ponytail: MediaRecorder WebMs ship with duration = NaN until
 	// fix-webm-duration patches the EBML header; until that flows through the
@@ -60,39 +64,7 @@ export async function importPendingRecording(): Promise<RecordingImportResult> {
 	// on "No clips yet" the moment the user lands in the project. Real duration
 	// overwrites this when handleLoadedMetadata fires with a finite value.
 	let doc = useProjectStore.getState().document;
-	if (continuationProjectId && doc && addedAsset) {
-		const durationSec = Math.max(0.001, (result.session?.durationMs ?? 60_000) / 1000);
-		const timelineStartSec = doc.timeline.clips.reduce(
-			(max, clip) => Math.max(max, clip.timelineEndSec),
-			0,
-		);
-		const next = {
-			...doc,
-			assets: doc.assets.map((asset) =>
-				asset.id === addedAsset.id ? { ...asset, durationSec } : asset,
-			),
-			timeline: {
-				...doc.timeline,
-				clips: [
-					...doc.timeline.clips,
-					{
-						id: createId("clip"),
-						assetId: addedAsset.id,
-						sourceStartSec: 0,
-						sourceEndSec: durationSec,
-						timelineStartSec,
-						timelineEndSec: timelineStartSec + durationSec,
-						wordRefs: [],
-						origin: "system" as const,
-						reason: "Continued recording",
-					},
-				],
-			},
-		};
-		await useProjectStore.getState().saveDocument(next, { history: false });
-		doc = next;
-		await api.setCurrentRecordingSession(null);
-	} else if (doc && doc.timeline.clips.length === 0 && doc.assets.length > 0) {
+	if (doc && doc.timeline.clips.length === 0 && doc.assets.length > 0) {
 		// `history: false`. Nothing here is an edit: the user finished a recording and the
 		// editor built them a project around it, unattended, on mount. Recording it left a
 		// brand-new project sitting at `past.length === 1` before the user had touched
@@ -106,7 +78,7 @@ export async function importPendingRecording(): Promise<RecordingImportResult> {
 	}
 	return {
 		imported: true,
-		continued: Boolean(continuationProjectId),
+		continued: false,
 		...(result.session?.stopReason ? { stopReason: result.session.stopReason } : {}),
 	};
 }

@@ -142,7 +142,6 @@ const DECLARED: WritePath[] = [
 	w("src/components/ai-edition/NewEditorShell.tsx", "unsubSaveBeforeClose", "save", "gesture"),
 	// A completed continuation is appended after the editor reopens. This is part
 	// of importing the recorded take, not a timeline edit requested by the user.
-	w("src/components/ai-edition/recordingImport.ts", "importPendingRecording", "save", "automatic"),
 
 	// The agent's document. The optimistic write is not the edit — the save is, and
 	// it names the pre-agent document as what Ctrl+Z returns to.

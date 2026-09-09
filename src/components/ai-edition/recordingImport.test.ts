@@ -43,7 +43,7 @@ function stubElectronApi(
 				createdAt: number;
 				durationMs?: number;
 				stopReason?: "low-disk";
-				continuationProjectId?: string;
+				returnProjectId?: string;
 		  },
 ) {
 	let session = typeof value === "string" ? { screenVideoPath: value, createdAt: 0 } : value;
@@ -111,13 +111,13 @@ describe("importPendingRecording", () => {
 		expect(addAsset).toHaveBeenCalledTimes(1);
 	});
 
-	it("appends a continued recording to the existing project timeline", async () => {
+	it("returns to the existing project and leaves the recording in the library", async () => {
 		const api = stubElectronApi({
 			screenVideoPath: "/recordings/recording-2.webm",
 			createdAt: 2,
 			durationMs: 12_000,
 			stopReason: "low-disk",
-			continuationProjectId: "project-1",
+			returnProjectId: "project-1",
 		});
 		const previous = {
 			assets: [{ id: "asset-1", durationSec: 10 }],
@@ -137,37 +137,17 @@ describe("importPendingRecording", () => {
 			useProjectStore.setState({ document: previous as any });
 			return null;
 		});
-		addAsset.mockImplementationOnce(async () => {
-			const asset = {
-				id: "asset-2",
-				label: "recording-2.webm",
-				originalPath: "/recordings/recording-2.webm",
-			};
-			useProjectStore.setState({
-				document: {
-					...previous,
-					assets: [...previous.assets, asset],
-				} as unknown as AxcutDocument,
-			});
-			// biome-ignore lint/suspicious/noExplicitAny: focused import fixture
-			return asset as any;
-		});
-
 		await expect(importPendingRecording()).resolves.toEqual({
 			imported: true,
-			continued: true,
+			continued: false,
+			savedToLibrary: true,
 			stopReason: "low-disk",
 		});
 
 		expect(loadProject).toHaveBeenCalledWith("project-1");
-		const continued = saveDocument.mock.calls.at(-1)?.[0];
-		expect(continued?.timeline.clips).toHaveLength(2);
-		expect(continued?.timeline.clips[1]).toMatchObject({
-			assetId: "asset-2",
-			sourceEndSec: 12,
-			timelineStartSec: 10,
-			timelineEndSec: 22,
-		});
+		expect(addAsset).not.toHaveBeenCalled();
+		expect(saveDocument).not.toHaveBeenCalled();
+		expect(useProjectStore.getState().document).toBe(previous);
 		expect(api.setCurrentRecordingSession).toHaveBeenCalledWith(null);
 	});
 

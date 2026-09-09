@@ -86,7 +86,7 @@ import {
 import { patchWebmDurationOnDisk } from "../recording/webm-duration";
 import { reindexRecordingOnDisk } from "../recording/webm-seek-index";
 import { registerNativeBridgeHandlers } from "./nativeBridge";
-import { getRecordingStorageStatus } from "./recordingStorage";
+import { getRecordingStorageStatus, listRecordingLibrary } from "./recordingStorage";
 import { RecordingStreamRegistry, registerRecordingStreamHandlers } from "./recordingStream";
 
 const PROJECT_FILE_EXTENSION = "openscreen";
@@ -493,7 +493,7 @@ let selectedDesktopSource: DesktopCapturerSource | null = null;
 let lastEnumeratedSources = new Map<string, DesktopCapturerSource>();
 let currentProjectPath: string | null = null;
 let currentRecordingSession: RecordingSession | null = null;
-let recordingContinuationProjectId: string | null = null;
+let recordingReturnProjectId: string | null = null;
 
 // single source of truth for the mic/camera/system-audio/cursor
 // choices a user makes in the editor's Rec-mode stage, so the HUD window's
@@ -1528,14 +1528,13 @@ function waitForNativeMacCaptureStop(proc: ChildProcessWithoutNullStreams) {
 }
 
 function setCurrentRecordingSessionState(session: RecordingSession | null) {
-	const inheritedContinuationProjectId =
+	const inheritedReturnProjectId =
 		session && currentRecordingSession?.screenVideoPath === session.screenVideoPath
-			? currentRecordingSession.continuationProjectId
+			? currentRecordingSession.returnProjectId
 			: undefined;
-	const continuationProjectId = recordingContinuationProjectId ?? inheritedContinuationProjectId;
-	currentRecordingSession =
-		session && continuationProjectId ? { ...session, continuationProjectId } : session;
-	recordingContinuationProjectId = null;
+	const returnProjectId = recordingReturnProjectId ?? inheritedReturnProjectId;
+	currentRecordingSession = session && returnProjectId ? { ...session, returnProjectId } : session;
+	recordingReturnProjectId = null;
 	currentVideoPath = session?.screenVideoPath ?? null;
 }
 
@@ -2029,11 +2028,9 @@ export function registerIpcHandlers(
 		return { success: true };
 	});
 
-	ipcMain.handle("start-new-recording", (_event, continuationProjectId?: string) => {
-		recordingContinuationProjectId =
-			typeof continuationProjectId === "string" && continuationProjectId.trim()
-				? continuationProjectId.trim()
-				: null;
+	ipcMain.handle("start-new-recording", (_event, returnProjectId?: string) => {
+		recordingReturnProjectId =
+			typeof returnProjectId === "string" && returnProjectId.trim() ? returnProjectId.trim() : null;
 		_switchToHud?.();
 		const hudWindow = getMainWindow();
 		if (hudWindow && !hudWindow.isDestroyed()) {
@@ -4066,12 +4063,30 @@ export function registerIpcHandlers(
 		return setCurrentVideoPath(path);
 	});
 
-	ipcMain.handle("set-current-recording-session", (_, session: RecordingSession | null) => {
+	ipcMain.handle("set-current-recording-session", async (_, session: RecordingSession | null) => {
 		const normalizedSession = normalizeRecordingSession(session);
 		setCurrentRecordingSessionState(normalizedSession);
 		currentVideoPath = normalizedSession?.screenVideoPath ?? null;
 		currentProjectPath = null;
+		if (
+			currentRecordingSession &&
+			isPathWithinDir(currentRecordingSession.screenVideoPath, RECORDINGS_DIR)
+		) {
+			await fs.writeFile(
+				getSessionManifestPathForVideo(currentRecordingSession.screenVideoPath),
+				JSON.stringify(currentRecordingSession, null, 2),
+				"utf-8",
+			);
+		}
 		return { success: true, session: currentRecordingSession };
+	});
+
+	ipcMain.handle("list-recording-library", async () => {
+		try {
+			return { success: true, recordings: await listRecordingLibrary(RECORDINGS_DIR) };
+		} catch (error) {
+			return { success: false, recordings: [], error: String(error) };
+		}
 	});
 
 	ipcMain.handle("get-current-recording-session", () => {

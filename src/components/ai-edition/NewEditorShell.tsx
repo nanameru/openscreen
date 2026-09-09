@@ -237,6 +237,16 @@ export function NewEditorShell() {
 			try {
 				const recordingImport = await importPendingRecording();
 				if (recordingImport.imported) {
+					if (recordingImport.savedToLibrary) {
+						toast.success(te("mediaStage.savedToLibrary"), {
+							description:
+								recordingImport.stopReason === "low-disk"
+									? te("mediaStage.lowDiskSavedToLibraryHint")
+									: te("mediaStage.savedToLibraryHint"),
+							duration: 12_000,
+						});
+						return;
+					}
 					if (recordingImport.stopReason === "low-disk") {
 						toast.warning("Recording paused before storage ran out", {
 							description:
@@ -286,7 +296,7 @@ export function NewEditorShell() {
 				console.warn("[editor] auto-load failed", e);
 			}
 		})();
-	}, [loadProject]);
+	}, [loadProject, te]);
 
 	// Warn on close when dirty
 	useEffect(() => {

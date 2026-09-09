@@ -36,9 +36,7 @@ interface Window {
 		getSources: (opts: Electron.SourcesOptions) => Promise<ProcessedDesktopSource[]>;
 		switchToEditor: () => Promise<void>;
 		switchToHud: () => Promise<void>;
-		startNewRecording: (
-			continuationProjectId?: string,
-		) => Promise<{ success: boolean; error?: string }>;
+		startNewRecording: (returnProjectId?: string) => Promise<{ success: boolean; error?: string }>;
 		openSourceSelector: () => Promise<{
 			opened: boolean;
 			reason?: string;
@@ -301,6 +299,11 @@ interface Window {
 			availableBytes?: number;
 			totalBytes?: number;
 			safetyStopBytes?: number;
+			error?: string;
+		}>;
+		listRecordingLibrary: () => Promise<{
+			success: boolean;
+			recordings: import("../src/lib/recordingLibrary").RecordingLibraryItem[];
 			error?: string;
 		}>;
 		getCurrentRecordingSession: () => Promise<{

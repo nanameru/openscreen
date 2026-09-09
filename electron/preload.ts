@@ -106,8 +106,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	switchToHud: () => {
 		return ipcRenderer.invoke("switch-to-hud");
 	},
-	startNewRecording: (continuationProjectId?: string) => {
-		return ipcRenderer.invoke("start-new-recording", continuationProjectId);
+	startNewRecording: (returnProjectId?: string) => {
+		return ipcRenderer.invoke("start-new-recording", returnProjectId);
 	},
 	openSourceSelector: () => {
 		return ipcRenderer.invoke("open-source-selector");
@@ -177,6 +177,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	},
 	getRecordingStorageStatus: () => {
 		return ipcRenderer.invoke("get-recording-storage-status");
+	},
+	listRecordingLibrary: () => {
+		return ipcRenderer.invoke("list-recording-library");
 	},
 	setRecordingState: (
 		recording: boolean,

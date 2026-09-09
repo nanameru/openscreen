@@ -30,23 +30,45 @@ cases:
     issues: [12]
 
   - id: TC-LOWDISK-03
-    title: "容量確保後の録画を同じプロジェクト末尾へ追加する"
-    feature: "録画継続"
-    scenario: "複数セグメントの同一プロジェクト化"
+    title: "保存済み録画を同じプロジェクト末尾へ明示的に追加する"
+    feature: "録画ライブラリ"
+    scenario: "複数セグメントを選択して同一プロジェクト化"
     status: done
     priority: high
     type: integration
-    source: [src/components/ai-edition/recordingImport.ts]
-    test_file: "src/components/ai-edition/recordingImport.test.ts"
+    source: [src/components/ai-edition/v4/MediaStage.tsx]
+    test_file: "src/components/ai-edition/v4/MediaStage.test.ts"
     issues: [12]
 
   - id: TC-LOWDISK-04
-    title: "macOSで低容量停止後に続きを録画して編集できる"
-    feature: "録画継続"
-    scenario: "実アプリの停止・再開"
-    status: done
+    title: "macOSで低容量停止後の録画をライブラリから再利用できる"
+    feature: "録画ライブラリ"
+    scenario: "実アプリの停止・保存・明示追加"
+    status: doing
     priority: high
     type: manual
     source: [src/hooks/useScreenRecorder.ts, src/components/ai-edition/NewEditorShell.tsx]
     test_file: "technical-documentation/testing/manual-e2e-checklist.md"
+    issues: [12]
+
+  - id: TC-LOWDISK-05
+    title: "同じ録画パスを追加してもプロジェクトアセットを複製しない"
+    feature: "録画ライブラリ"
+    scenario: "同一ソースの参照再利用"
+    status: done
+    priority: high
+    type: regression
+    source: [src/components/ai-edition/v4/MediaStage.tsx]
+    test_file: "src/components/ai-edition/v4/MediaStage.test.ts"
+    issues: [12]
+
+  - id: TC-LOWDISK-06
+    title: "編集画面からの通常録画をタイムラインへ自動追加しない"
+    feature: "録画ライブラリ"
+    scenario: "意図的な新規録画の保存"
+    status: done
+    priority: high
+    type: regression
+    source: [src/components/ai-edition/recordingImport.ts]
+    test_file: "src/components/ai-edition/recordingImport.test.ts"
     issues: [12]

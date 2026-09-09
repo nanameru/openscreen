@@ -19,7 +19,7 @@ export interface RecordingSession extends ProjectMedia {
 	createdAt: number;
 	durationMs?: number;
 	stopReason?: "low-disk";
-	continuationProjectId?: string;
+	returnProjectId?: string;
 }
 
 export interface RecordedVideoAssetInput {
@@ -105,8 +105,8 @@ export function normalizeRecordingSession(candidate: unknown): RecordingSession 
 			? { durationMs: Math.max(0, raw.durationMs) }
 			: {}),
 		...(raw.stopReason === "low-disk" ? { stopReason: raw.stopReason } : {}),
-		...(typeof raw.continuationProjectId === "string" && raw.continuationProjectId.trim()
-			? { continuationProjectId: raw.continuationProjectId.trim() }
+		...(typeof raw.returnProjectId === "string" && raw.returnProjectId.trim()
+			? { returnProjectId: raw.returnProjectId.trim() }
 			: {}),
 	};
 }

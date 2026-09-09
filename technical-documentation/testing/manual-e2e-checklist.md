@@ -410,6 +410,7 @@ The agent may only call the fixed tool set in [ai-agent.md](../architecture/ai-a
 - [ ] Grant screen-recording, microphone, and camera permissions and confirm the app reflects the granted devices.
 - [ ] Record while switching Spaces with the HUD visible and confirm recording continues.
 - [ ] Stop a recording and confirm the editor opens without a crash during native recorder shutdown.
+- [ ] Start a recording from an existing editor project, stop it normally, and confirm it returns to that project without silently adding a clip. Open Media, confirm the saved recording appears with date, duration, and size, then click Add to timeline and confirm it appends exactly once. Repeat with the development low-disk threshold and confirm the safely stopped recording is highlighted; adding the same source again must reuse one project asset while allowing another explicit timeline clip.
 - [ ] Confirm the tray or menu-bar item can refocus the HUD after it is hidden.
 - [ ] Confirm the HUD and notes window are excluded from captured video when content protection is enabled.
 - [ ] Confirm a physical webcam picture-in-picture records and plays back with the selected layout.
