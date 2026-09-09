@@ -44,7 +44,7 @@ cases:
     title: "macOSで低容量停止後の録画をライブラリから再利用できる"
     feature: "録画ライブラリ"
     scenario: "実アプリの停止・保存・明示追加"
-    status: doing
+    status: done
     priority: high
     type: manual
     source: [src/hooks/useScreenRecorder.ts, src/components/ai-edition/NewEditorShell.tsx]
