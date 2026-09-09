@@ -63,6 +63,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // HUD/tray/menu. Parsed before any GUI side effects; see electron/cli/.
 const cliCommand = parseCliArgs(process.argv, app.isPackaged ? 1 : 2);
 
+// Keep automated desktop checks away from a user's real projects and recordings.
+// Packaged builds deliberately ignore this escape hatch.
+const testUserDataDir = process.env.OPENSCREEN_TEST_USER_DATA_DIR?.trim();
+if (!app.isPackaged && testUserDataDir) {
+	app.setPath("userData", path.resolve(testUserDataDir));
+}
+
 // Use Screen & System Audio Recording permissions instead of the CoreAudio Tap API on macOS.
 // Tap needs NSAudioCaptureUsageDescription in the parent app's Info.plist, which breaks when
 // running from a terminal/IDE during dev.

@@ -86,12 +86,14 @@ import {
 import { patchWebmDurationOnDisk } from "../recording/webm-duration";
 import { reindexRecordingOnDisk } from "../recording/webm-seek-index";
 import { registerNativeBridgeHandlers } from "./nativeBridge";
+import { getRecordingStorageStatus } from "./recordingStorage";
 import { RecordingStreamRegistry, registerRecordingStreamHandlers } from "./recordingStream";
 
 const PROJECT_FILE_EXTENSION = "openscreen";
 export const SHORTCUTS_FILE = path.join(app.getPath("userData"), "shortcuts.json");
 const RECORDING_FILE_PREFIX = "recording-";
 const RECORDING_SESSION_SUFFIX = ".session.json";
+const LOW_DISK_STOP_BYTES = 1_073_741_824;
 const ALLOWED_IMPORT_VIDEO_EXTENSIONS = new Set([
 	".webm",
 	".mp4",
@@ -491,6 +493,7 @@ let selectedDesktopSource: DesktopCapturerSource | null = null;
 let lastEnumeratedSources = new Map<string, DesktopCapturerSource>();
 let currentProjectPath: string | null = null;
 let currentRecordingSession: RecordingSession | null = null;
+let recordingContinuationProjectId: string | null = null;
 
 // single source of truth for the mic/camera/system-audio/cursor
 // choices a user makes in the editor's Rec-mode stage, so the HUD window's
@@ -1525,7 +1528,14 @@ function waitForNativeMacCaptureStop(proc: ChildProcessWithoutNullStreams) {
 }
 
 function setCurrentRecordingSessionState(session: RecordingSession | null) {
-	currentRecordingSession = session;
+	const inheritedContinuationProjectId =
+		session && currentRecordingSession?.screenVideoPath === session.screenVideoPath
+			? currentRecordingSession.continuationProjectId
+			: undefined;
+	const continuationProjectId = recordingContinuationProjectId ?? inheritedContinuationProjectId;
+	currentRecordingSession =
+		session && continuationProjectId ? { ...session, continuationProjectId } : session;
+	recordingContinuationProjectId = null;
 	currentVideoPath = session?.screenVideoPath ?? null;
 }
 
@@ -2019,7 +2029,11 @@ export function registerIpcHandlers(
 		return { success: true };
 	});
 
-	ipcMain.handle("start-new-recording", () => {
+	ipcMain.handle("start-new-recording", (_event, continuationProjectId?: string) => {
+		recordingContinuationProjectId =
+			typeof continuationProjectId === "string" && continuationProjectId.trim()
+				? continuationProjectId.trim()
+				: null;
 		_switchToHud?.();
 		const hudWindow = getMainWindow();
 		if (hudWindow && !hudWindow.isDestroyed()) {
@@ -3146,6 +3160,23 @@ export function registerIpcHandlers(
 	// finalize through the same registry.
 	const recordingStreams = new RecordingStreamRegistry();
 	registerRecordingStreamHandlers(ipcMain, recordingStreams, resolveRecordingOutputPath);
+	ipcMain.handle("get-recording-storage-status", async () => {
+		try {
+			await fs.mkdir(RECORDINGS_DIR, { recursive: true });
+			const configuredStopBytes = Number(process.env.OPENSCREEN_LOW_DISK_STOP_BYTES);
+			const safetyStopBytes =
+				Number.isFinite(configuredStopBytes) && configuredStopBytes > 0
+					? configuredStopBytes
+					: LOW_DISK_STOP_BYTES;
+			return {
+				success: true,
+				...(await getRecordingStorageStatus(RECORDINGS_DIR)),
+				safetyStopBytes,
+			};
+		} catch (error) {
+			return { success: false, error: error instanceof Error ? error.message : String(error) };
+		}
+	});
 
 	/**
 	 * Writes a browser-recorded webcam clip next to a natively-recorded screen
@@ -3367,10 +3398,18 @@ export function registerIpcHandlers(
 					screenVideoPath,
 					webcamVideoPath,
 					createdAt,
+					...(isValidDurationMs(payload.durationMs) ? { durationMs: payload.durationMs } : {}),
+					...(payload.stopReason === "low-disk" ? { stopReason: payload.stopReason } : {}),
 					...(webcamOffsetMs !== undefined ? { webcamOffsetMs } : {}),
 					...(cursorCaptureMode ? { cursorCaptureMode } : {}),
 				}
-			: { screenVideoPath, createdAt, ...(cursorCaptureMode ? { cursorCaptureMode } : {}) };
+			: {
+					screenVideoPath,
+					createdAt,
+					...(isValidDurationMs(payload.durationMs) ? { durationMs: payload.durationMs } : {}),
+					...(payload.stopReason === "low-disk" ? { stopReason: payload.stopReason } : {}),
+					...(cursorCaptureMode ? { cursorCaptureMode } : {}),
+				};
 		setCurrentRecordingSessionState(session);
 		currentProjectPath = null;
 

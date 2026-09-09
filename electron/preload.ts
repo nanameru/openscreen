@@ -106,8 +106,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	switchToHud: () => {
 		return ipcRenderer.invoke("switch-to-hud");
 	},
-	startNewRecording: () => {
-		return ipcRenderer.invoke("start-new-recording");
+	startNewRecording: (continuationProjectId?: string) => {
+		return ipcRenderer.invoke("start-new-recording", continuationProjectId);
 	},
 	openSourceSelector: () => {
 		return ipcRenderer.invoke("open-source-selector");
@@ -174,6 +174,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
 	getRecordedVideoPath: () => {
 		return ipcRenderer.invoke("get-recorded-video-path");
+	},
+	getRecordingStorageStatus: () => {
+		return ipcRenderer.invoke("get-recording-storage-status");
 	},
 	setRecordingState: (
 		recording: boolean,
